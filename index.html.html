@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lavique 委託販売管理</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root {
+  --cream: #faf8f5; --warm-white: #fff9f5; --blush: #e8d5c8; --rose: #c9a090;
+  --deep-rose: #a0695a; --mauve: #7d5a6a; --deep: #3d2b35; --text: #2c1f26;
+  --muted: #8a7070; --border: #e0cfc8; --light-border: #efe6e0; --accent: #c9847a;
+  --success: #7aaa8a; --warning: #d4a85a;
+  --shadow: 0 2px 12px rgba(61,43,53,0.08); --shadow-lg: 0 8px 32px rgba(61,43,53,0.12);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Noto Sans JP', sans-serif; background: var(--cream); color: var(--text); min-height: 100vh; }
+.app-header { background: var(--deep); color: white; padding: 18px 32px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 16px rgba(0,0,0,0.2); }
+.app-header h1 { font-family: 'Noto Serif JP', serif; font-size: 18px; font-weight: 500; letter-spacing: 0.05em; }
+.app-header .subtitle { font-size: 11px; color: var(--blush); margin-top: 2px; letter-spacing: 0.08em; }
+.tabs { background: white; border-bottom: 1px solid var(--border); display: flex; padding: 0 32px; box-shadow: var(--shadow); overflow-x: auto; }
+.tab { padding: 16px 22px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); border-bottom: 3px solid transparent; transition: all 0.2s; white-space: nowrap; }
+.tab:hover { color: var(--deep-rose); }
+.tab.active { color: var(--deep-rose); border-bottom-color: var(--accent); }
+.main { padding: 28px 32px; max-width: 1200px; margin: 0 auto; }
+.panel { display: none; }
+.panel.active { display: block; }
+.card { background: white; border-radius: 12px; border: 1px solid var(--light-border); box-shadow: var(--shadow); padding: 24px 28px; margin-bottom: 20px; }
+.card-title { font-family: 'Noto Serif JP', serif; font-size: 15px; font-weight: 500; color: var(--deep); margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--light-border); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.form-group input, .form-group select { padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Noto Sans JP', sans-serif; font-size: 13px; color: var(--text); background: var(--warm-white); transition: all 0.2s; outline: none; }
+.form-group input:focus, .form-group select:focus { border-color: var(--rose); box-shadow: 0 0 0 3px rgba(201,160,144,0.15); }
+.btn { padding: 9px 18px; border: none; border-radius: 8px; cursor: pointer; font-family: 'Noto Sans JP', sans-serif; font-size: 13px; font-weight: 500; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: var(--deep-rose); color: white; }
+.btn-primary:hover { background: var(--mauve); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(160,105,90,0.3); }
+.btn-secondary { background: var(--blush); color: var(--deep); }
+.btn-secondary:hover { background: var(--rose); color: white; }
+.btn-success { background: var(--success); color: white; }
+.btn-success:hover { background: #5a8a6a; }
+.btn-outline { background: transparent; color: var(--deep-rose); border: 1px solid var(--rose); }
+.btn-outline:hover { background: var(--blush); }
+.btn-danger { background: transparent; color: #c0605a; border: 1px solid #e0a09a; padding: 5px 10px; font-size: 12px; }
+.btn-danger:hover { background: #fff0ee; }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--light-border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: var(--deep); color: white; padding: 11px 14px; text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; white-space: nowrap; }
+thead th.sort { cursor: pointer; user-select: none; }
+thead th.sort:hover { background: var(--mauve); }
+tbody tr { border-bottom: 1px solid var(--light-border); transition: background 0.15s; }
+tbody tr:hover { background: #fdf5f0; }
+tbody tr:last-child { border-bottom: none; }
+tbody td { padding: 11px 14px; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tfoot td { padding: 11px 14px; background: var(--blush); font-weight: 600; border-top: 2px solid var(--rose); }
+tfoot td.num { text-align: right; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.badge-vendor { background: var(--blush); color: var(--mauve); }
+.badge-full { background: #e0f0e8; color: #3a7a5a; }
+.badge-seller { background: #fff3e0; color: #a06020; }
+.badge-none { background: #f5e8e0; color: #8a4040; }
+.upload-area { border: 2px dashed var(--rose); border-radius: 12px; padding: 36px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--warm-white); }
+.upload-area:hover, .upload-area.drag-over { border-color: var(--deep-rose); background: #fff0eb; }
+.upload-icon { font-size: 40px; margin-bottom: 10px; }
+.upload-area p { color: var(--muted); font-size: 13px; line-height: 1.8; }
+.upload-area strong { color: var(--deep-rose); }
+#csv-file-input { display: none; }
+.summary-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.summary-card { background: white; border: 1px solid var(--light-border); border-radius: 10px; padding: 14px 18px; text-align: center; }
+.sc-label { font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.sc-value { font-size: 20px; font-weight: 600; color: var(--deep); font-variant-numeric: tabular-nums; }
+.sc-value.accent { color: var(--deep-rose); }
+.sc-value.sm { font-size: 13px; font-weight: 500; }
+.empty { text-align: center; padding: 48px 20px; color: var(--muted); }
+.empty .ei { font-size: 44px; margin-bottom: 12px; }
+.empty p { font-size: 13px; line-height: 2; }
+.month-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.month-card { background: white; border: 2px solid var(--light-border); border-radius: 10px; padding: 16px 18px; cursor: pointer; transition: all 0.2s; position: relative; }
+.month-card:hover { border-color: var(--rose); transform: translateY(-2px); box-shadow: var(--shadow); }
+.month-card.selected { border-color: var(--deep-rose); background: #fff8f5; }
+.mc-label { font-family: 'Noto Serif JP', serif; font-size: 16px; font-weight: 600; color: var(--deep); margin-bottom: 6px; }
+.mc-meta { font-size: 11px; color: var(--muted); line-height: 1.9; }
+.mc-del { position: absolute; top: 10px; right: 10px; background: none; border: none; cursor: pointer; font-size: 16px; color: var(--muted); transition: color 0.2s; padding: 2px; }
+.mc-del:hover { color: #c05050; }
+.seller-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.seller-card { background: white; border: 2px solid var(--light-border); border-radius: 10px; padding: 16px 18px; cursor: pointer; transition: all 0.2s; }
+.seller-card:hover { border-color: var(--rose); transform: translateY(-2px); box-shadow: var(--shadow); }
+.sc-name { font-weight: 600; font-size: 15px; color: var(--deep); margin-bottom: 6px; }
+.sc-info { font-size: 11px; color: var(--muted); line-height: 1.9; }
+.url-link { font-size: 11px; color: var(--deep-rose); text-decoration: none; display: inline-flex; align-items: center; gap: 3px; }
+.url-link:hover { text-decoration: underline; }
+.toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar select, .toolbar input[type=text] { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'Noto Sans JP', sans-serif; font-size: 13px; color: var(--text); background: white; outline: none; }
+.toolbar select:focus, .toolbar input:focus { border-color: var(--rose); }
+.toast { position: fixed; bottom: 28px; right: 28px; background: var(--deep); color: white; padding: 12px 18px; border-radius: 10px; font-size: 13px; box-shadow: var(--shadow-lg); z-index: 9999; transform: translateY(80px); opacity: 0; transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1); max-width: 300px; }
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.ok { border-left: 4px solid var(--success); }
+.toast.err { border-left: 4px solid #e07070; }
+#product-card { border-left: 3px solid var(--accent); }
+</style>
+</head>
+<body>
+<div class="app-header">
+  <div>
+    <h1>🌸 Lavique 委託販売管理システム</h1>
+    <div class="subtitle">EC SHOP CONSIGNMENT MANAGEMENT</div>
+  </div>
+  <div style="font-size:11px;color:var(--blush);text-align:right">後藤あい / Lavique</div>
+</div>
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('sellers')">👤 販売者管理</div>
+  <div class="tab" onclick="switchTab('import')">📥 CSV取込</div>
+  <div class="tab" onclick="switchTab('sales')">📊 月次集計</div>
+  <div class="tab" onclick="switchTab('settlement')">📄 精算書発行</div>
+</div>
+<div class="main">
+
+<!-- 販売者管理 -->
+<div class="panel active" id="panel-sellers">
+  <div class="card">
+    <div class="card-title">➕ 販売者を登録</div>
+    <div class="form-row">
+      <div class="form-group"><label>販売者名</label><input id="s-name" placeholder="例：河崎友美"></div>
+      <div class="form-group"><label>ShopifyベンダーID（Vendor列）</label><input id="s-vendor" placeholder="例：papillon room"></div>
+      <div class="form-group"><label>メールアドレス</label><input id="s-email" type="email" placeholder="example@email.com"></div>
+      <div class="form-group"><label>電話番号</label><input id="s-phone" placeholder="090-0000-0000"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="grid-column:span 2"><label>住所</label><input id="s-address" placeholder="例：東京都渋谷区..."></div>
+      <div class="form-group" style="grid-column:span 2"><label>精算スプレッドシートURL</label><input id="s-sheeturl" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." style="font-size:12px"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>振込先銀行名</label><input id="s-bank" placeholder="◯◯銀行 △△支店"></div>
+      <div class="form-group"><label>口座種別</label><select id="s-banktype"><option>普通</option><option>当座</option></select></div>
+      <div class="form-group"><label>口座番号</label><input id="s-banknum" placeholder="1234567"></div>
+      <div class="form-group"><label>口座名義（カナ）</label><input id="s-bankname" placeholder="カワサキトモミ"></div>
+    </div>
+    <button class="btn btn-primary" onclick="saveSeller()">＋ 登録する</button>
+  </div>
+  <div class="card">
+    <div class="card-title">👥 登録済み販売者 <span id="s-count" style="margin-left:auto;font-size:12px;font-weight:400;color:var(--muted)"></span></div>
+    <div id="sellers-list"></div>
+  </div>
+  <div class="card" id="product-card" style="display:none">
+    <div class="card-title">🛍 商品登録 — <span id="p-seller-name" style="color:var(--deep-rose)"></span>
+      <button onclick="closeProducts()" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted)">✕</button>
+    </div>
+    <div class="form-row" style="max-width:560px">
+      <div class="form-group" style="flex:2"><label>商品名（Shopify内の名前と完全一致）</label><input id="p-name" placeholder="例：Dream Bear Garden"></div>
+      <div class="form-group"><label>単価（円）</label><input id="p-price" type="number" placeholder="1540" min="0"></div>
+      <div class="form-group" style="justify-content:flex-end"><label>&nbsp;</label><button class="btn btn-primary" onclick="addProduct()">＋ 追加</button></div>
+    </div>
+    <div id="product-list"></div>
+  </div>
+</div>
+
+<!-- CSV取込 -->
+<div class="panel" id="panel-import">
+  <div class="card">
+    <div class="card-title">📥 ShopifyエクスポートCSVを取り込む</div>
+    <div class="upload-area" id="drop-zone" onclick="document.getElementById('csv-file-input').click()">
+      <div class="upload-icon">📂</div>
+      <p><strong>クリックしてCSVを選択</strong>、またはドラッグ＆ドロップ</p>
+      <p>Shopify管理画面 → 注文 → エクスポート で取得したCSVファイル</p>
+    </div>
+    <input type="file" id="csv-file-input" accept=".csv" onchange="handleCSV(this)">
+  </div>
+  <div class="card" id="import-result" style="display:none">
+    <div class="card-title">✅ 取込プレビュー</div>
+    <div id="import-body"></div>
+  </div>
+</div>
+
+<!-- 月次集計 -->
+<div class="panel" id="panel-sales">
+  <div class="card">
+    <div class="card-title">🗓 保存済み月次データ</div>
+    <div id="month-grid"></div>
+  </div>
+  <div id="month-detail" style="display:none">
+    <div class="summary-bar" id="detail-summary"></div>
+    <div class="card">
+      <div class="card-title">
+        📋 <span id="detail-label"></span>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+          <select id="filter-vendor" onchange="renderDetailTable()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none"></select>
+          <input type="text" id="filter-q" oninput="renderDetailTable()" placeholder="🔍 商品名検索..." style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;min-width:160px">
+          <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ CSV出力</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th class="sort" onclick="doSort('vendor')">販売者</th>
+            <th class="sort" onclick="doSort('name')">商品名</th>
+            <th style="text-align:center">照合</th>
+            <th class="sort" onclick="doSort('qty')" style="text-align:right">販売数</th>
+            <th class="sort" onclick="doSort('price')" style="text-align:right">単価</th>
+            <th class="sort" onclick="doSort('revenue')" style="text-align:right">売上合計</th>
+            <th style="text-align:right">手数料(20%)</th>
+            <th class="sort" onclick="doSort('payout')" style="text-align:right">支払い金額</th>
+          </tr></thead>
+          <tbody id="detail-tbody"></tbody>
+          <tfoot id="detail-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 精算書発行 -->
+<div class="panel" id="panel-settlement">
+  <div class="card">
+    <div class="card-title">🗓 精算対象月を選択
+      <select id="stl-month" onchange="renderStlSellers()" style="margin-left:16px;padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none">
+        <option value="">— 月を選択 —</option>
+      </select>
+    </div>
+    <div id="stl-sellers">
+      <div class="empty"><p>月を選択すると販売者カードが表示されます</p></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+<div class="toast" id="toast-el"></div>
+
+<script>
+// ===== State =====
+const S = { sellers:[], records:[], curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false };
+
+function persist() {
+  try { localStorage.setItem('lv2_s', JSON.stringify(S.sellers)); localStorage.setItem('lv2_r', JSON.stringify(S.records)); } catch(e){}
+}
+function hydrate() {
+  try { S.sellers = JSON.parse(localStorage.getItem('lv2_s')||'[]'); S.records = JSON.parse(localStorage.getItem('lv2_r')||'[]'); } catch(e){}
+}
+
+// ===== UI helpers =====
+function switchTab(n) {
+  const names = ['sellers','import','sales','settlement'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===n));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-'+n).classList.add('active');
+  if (n==='sales') renderMonthGrid();
+  if (n==='settlement') renderStlPanel();
+}
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast-el');
+  el.textContent = msg; el.className = 'toast show '+type;
+  setTimeout(()=>el.classList.remove('show'), 3000);
+}
+
+// ===== Sellers =====
+function saveSeller() {
+  const name = document.getElementById('s-name').value.trim();
+  const vendor = document.getElementById('s-vendor').value.trim();
+  if (!name||!vendor) { toast('販売者名とVendor名は必須です','err'); return; }
+  S.sellers.push({ id:Date.now()+'', name, vendor,
+    email:document.getElementById('s-email').value.trim(),
+    phone:document.getElementById('s-phone').value.trim(),
+    address:document.getElementById('s-address').value.trim(),
+    sheetUrl:document.getElementById('s-sheeturl').value.trim(),
+    bank:document.getElementById('s-bank').value.trim(),
+    banktype:document.getElementById('s-banktype').value,
+    banknum:document.getElementById('s-banknum').value.trim(),
+    bankname:document.getElementById('s-bankname').value.trim(),
+    products:[]
+  });
+  persist(); renderSellersList();
+  ['s-name','s-vendor','s-email','s-phone','s-address','s-sheeturl','s-bank','s-banknum','s-bankname'].forEach(id=>document.getElementById(id).value='');
+  toast('販売者を登録しました ✓');
+}
+function delSeller(id) {
+  if (!confirm('削除しますか？')) return;
+  S.sellers = S.sellers.filter(s=>s.id!==id);
+  if (S.curProdSeller===id) closeProducts();
+  persist(); renderSellersList(); toast('削除しました');
+}
+function renderSellersList() {
+  document.getElementById('s-count').textContent = S.sellers.length+'名登録済み';
+  const el = document.getElementById('sellers-list');
+  if (!S.sellers.length) { el.innerHTML='<div class="empty" style="padding:36px"><div class="ei">👥</div><p>まだ登録されていません</p></div>'; return; }
+  el.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>販売者名</th><th>Vendor名</th><th>メール</th><th>スプレッドシート</th><th style="text-align:center">商品数</th><th></th></tr></thead>
+    <tbody>${S.sellers.map(s=>{
+      const pc=(s.products||[]).length;
+      return `<tr>
+        <td><strong>${s.name}</strong></td>
+        <td><span class="badge badge-vendor">${s.vendor}</span></td>
+        <td style="font-size:12px">${s.email||'—'}</td>
+        <td>${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank">🔗 開く</a>`:'<span style="font-size:11px;color:var(--muted)">未登録</span>'}</td>
+        <td style="text-align:center;font-weight:600;color:${pc>0?'var(--deep-rose)':'var(--muted)'}">${pc}件</td>
+        <td style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn btn-outline btn-sm" onclick="openProducts('${s.id}')">🛍 商品</button>
+          <button class="btn btn-danger" onclick="delSeller('${s.id}')">削除</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+// ===== Products =====
+function openProducts(sid) {
+  S.curProdSeller = sid;
+  const s = S.sellers.find(x=>x.id===sid);
+  document.getElementById('product-card').style.display='block';
+  document.getElementById('p-seller-name').textContent=s.name;
+  document.getElementById('p-name').value=''; document.getElementById('p-price').value='';
+  renderProducts(sid);
+  document.getElementById('product-card').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function closeProducts() {
+  S.curProdSeller=null; document.getElementById('product-card').style.display='none';
+}
+function addProduct() {
+  const name=document.getElementById('p-name').value.trim();
+  const price=parseInt(document.getElementById('p-price').value)||0;
+  if (!name) { toast('商品名を入力してください','err'); return; }
+  const s=S.sellers.find(x=>x.id===S.curProdSeller); if (!s) return;
+  if (!s.products) s.products=[];
+  if (s.products.find(p=>p.name===name)) { toast('同じ商品名が既に登録されています','err'); return; }
+  s.products.push({id:Date.now()+'', name, price});
+  persist(); renderProducts(s.id); renderSellersList(); 
+  document.getElementById('p-name').value=''; document.getElementById('p-price').value='';
+  toast('商品を追加しました ✓');
+}
+function delProduct(sid, pid) {
+  const s=S.sellers.find(x=>x.id===sid); if (!s) return;
+  s.products=(s.products||[]).filter(p=>p.id!==pid);
+  persist(); renderProducts(sid); renderSellersList(); toast('削除しました');
+}
+function renderProducts(sid) {
+  const s=S.sellers.find(x=>x.id===sid);
+  const prods=s?.products||[];
+  const el=document.getElementById('product-list');
+  if (!prods.length) { el.innerHTML='<p style="font-size:13px;color:var(--muted);padding:10px 0">商品が登録されていません</p>'; return; }
+  el.innerHTML=`<div class="table-wrap"><table>
+    <thead><tr><th>商品名</th><th style="text-align:right">単価</th><th></th></tr></thead>
+    <tbody>${prods.map(p=>`<tr>
+      <td>${p.name}</td>
+      <td class="num">¥${p.price.toLocaleString()}</td>
+      <td style="text-align:right"><button class="btn btn-danger" onclick="delProduct('${sid}','${p.id}')">削除</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+// ===== CSV Import =====
+function handleCSV(inp) {
+  const f=inp.files[0]; if (!f) return;
+  const r=new FileReader(); r.onload=e=>parseCSV(e.target.result,f.name); r.readAsText(f,'UTF-8');
+}
+function csvLine(line) {
+  const res=[]; let cur='', inQ=false;
+  for (let i=0;i<line.length;i++) {
+    const c=line[i];
+    if (c==='"') { if (inQ&&line[i+1]==='"'){cur+='"';i++;} else inQ=!inQ; }
+    else if (c===','&&!inQ) { res.push(cur); cur=''; }
+    else cur+=c;
+  }
+  res.push(cur); return res;
+}
+function parseCSV(text, filename) {
+  const lines=text.split('\n').map(l=>l.trim()).filter(l=>l);
+  if (lines.length<2) { toast('CSVが空です','err'); return; }
+  const headers=csvLine(lines[0]);
+  const idx=h=>headers.findIndex(x=>x===h);
+  const iN=idx('Lineitem name'), iQ=idx('Lineitem quantity'), iP=idx('Lineitem price');
+  const iV=idx('Vendor'), iC=idx('Created at');
+  if (iN<0||iQ<0||iP<0) { toast('Shopify形式のCSVではありません','err'); return; }
+
+  const raw=[];
+  let minD=null, maxD=null;
+  for (let i=1;i<lines.length;i++) {
+    const c=csvLine(lines[i]);
+    const name=c[iN]; if (!name) continue;
+    const qty=parseFloat(c[iQ])||0; if (!qty) continue;
+    const price=parseFloat(c[iP])||0;
+    const vendor=iV>=0?(c[iV]||'不明'):'不明';
+    const created=iC>=0?c[iC]:'';
+    if (created) { const d=new Date(created); if (!isNaN(d)) { if (!minD||d<minD)minD=d; if (!maxD||d>maxD)maxD=d; } }
+    raw.push({name,qty,price,vendor});
+  }
+
+  // Aggregate
+  const map={};
+  raw.forEach(r=>{
+    const k=r.vendor+'|||'+r.name;
+    if (!map[k]) map[k]={vendor:r.vendor,name:r.name,price:r.price,qty:0};
+    map[k].qty+=r.qty;
+  });
+
+  // Match + use registered price if available
+  const rows=Object.values(map).map(r=>{
+    const sm=S.sellers.find(s=>s.vendor===r.vendor);
+    const pm=sm?(sm.products||[]).find(p=>p.name===r.name):null;
+    const match=sm&&pm?'full':sm?'seller':'none';
+    return {...r, price:pm?pm.price:r.price, match};
+  });
+
+  const fmt=d=>`${d.getFullYear()}年${d.getMonth()+1}月`;
+  const fmtFull=d=>`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+  const label=minD&&maxD&&minD.getMonth()===maxD.getMonth()?fmt(minD):(minD?fmt(minD)+'〜'+fmt(maxD):filename);
+  const period=minD&&maxD?fmtFull(minD)+' 〜 '+fmtFull(maxD):'';
+
+  const existIdx=S.records.findIndex(m=>m.label===label);
+  const nFull=rows.filter(r=>r.match==='full').length;
+  const nSeller=rows.filter(r=>r.match==='seller').length;
+  const nNone=rows.filter(r=>r.match==='none').length;
+  const vendors=[...new Set(rows.map(r=>r.vendor))];
+
+  const el=document.getElementById('import-result');
+  el.style.display='block';
+  document.getElementById('import-body').innerHTML=`
+    <div class="summary-bar" style="margin-bottom:16px">
+      <div class="summary-card"><div class="sc-label">対象期間</div><div class="sc-value sm">${label}</div></div>
+      <div class="summary-card"><div class="sc-label">商品種類</div><div class="sc-value">${rows.length}</div></div>
+      <div class="summary-card"><div class="sc-label">販売者数</div><div class="sc-value accent">${vendors.length}</div></div>
+      <div class="summary-card"><div class="sc-label">✓ 完全一致</div><div class="sc-value" style="color:var(--success)">${nFull}</div></div>
+      <div class="summary-card"><div class="sc-label">販売者のみ</div><div class="sc-value" style="color:var(--warning)">${nSeller}</div></div>
+      <div class="summary-card"><div class="sc-label">未照合</div><div class="sc-value" style="color:#c08080">${nNone}</div></div>
+    </div>
+    ${existIdx>=0?`<div style="background:#fff8e8;border:1px solid #e8d080;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13px">⚠️ <strong>${label}</strong> のデータは保存済みです。上書きしますか？</div>`:''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="save-btn" onclick="saveRecord(${JSON.stringify(label)},${JSON.stringify(period)},${JSON.stringify(rows)},${existIdx})">
+        ${existIdx>=0?'⬆ 上書き保存':'💾 月次データとして保存'}
+      </button>
+      <button class="btn btn-secondary" onclick="switchTab('sales')">→ 月次集計を確認</button>
+    </div>`;
+}
+function saveRecord(label, period, rows, existIdx) {
+  const rec={id:Date.now()+'', label, period, rows, savedAt:new Date().toLocaleDateString('ja-JP')};
+  if (existIdx>=0) S.records[existIdx]=rec; else S.records.unshift(rec);
+  persist();
+  document.getElementById('import-result').style.display='none';
+  toast(`${label} を保存しました ✓`);
+  switchTab('sales');
+}
+
+// ===== Monthly =====
+function agg(rows) {
+  const map={};
+  rows.forEach(r=>{
+    const k=r.vendor+'|||'+r.name;
+    if (!map[k]) map[k]={vendor:r.vendor,name:r.name,price:r.price,qty:0,match:r.match||'none'};
+    map[k].qty+=r.qty;
+  });
+  return Object.values(map).map(r=>{
+    const rev=r.qty*r.price, comm=Math.round(rev*0.2);
+    return {...r, revenue:rev, commission:comm, payout:rev-comm};
+  });
+}
+function renderMonthGrid() {
+  const el=document.getElementById('month-grid');
+  if (!S.records.length) {
+    el.innerHTML='<div class="empty" style="padding:36px"><div class="ei">📅</div><p>まだデータがありません。<br>「CSV取込」からアップロードしてください。</p></div>';
+    document.getElementById('month-detail').style.display='none';
+    return;
+  }
+  el.innerHTML=`<div class="month-grid">${S.records.map(m=>{
+    const a=agg(m.rows);
+    const rev=a.reduce((s,r)=>s+r.revenue,0);
+    const vn=[...new Set(m.rows.map(r=>r.vendor))].length;
+    return `<div class="month-card${S.curMonthId===m.id?' selected':''}" onclick="selectMonth('${m.id}')">
+      <button class="mc-del" onclick="event.stopPropagation();delMonth('${m.id}')">🗑</button>
+      <div class="mc-label">${m.label}</div>
+      <div class="mc-meta">${m.period||''}<br>販売者 ${vn}名 ／ 売上 ¥${rev.toLocaleString()}<br>保存日：${m.savedAt||'—'}</div>
+    </div>`;
+  }).join('')}</div>`;
+  if (S.curMonthId) showDetail(S.curMonthId);
+}
+function selectMonth(id) {
+  S.curMonthId=id; renderMonthGrid();
+}
+function delMonth(id) {
+  const m=S.records.find(r=>r.id===id);
+  if (!confirm(`「${m?.label}」を削除しますか？`)) return;
+  S.records=S.records.filter(r=>r.id!==id);
+  if (S.curMonthId===id) { S.curMonthId=null; document.getElementById('month-detail').style.display='none'; }
+  persist(); renderMonthGrid(); toast('削除しました');
+}
+function showDetail(id) {
+  const m=S.records.find(r=>r.id===id); if (!m) return;
+  document.getElementById('month-detail').style.display='block';
+  document.getElementById('detail-label').textContent=m.label+' 月次集計';
+  const vendors=[...new Set(m.rows.map(r=>r.vendor))];
+  const vs=document.getElementById('filter-vendor');
+  const cur=vs.value;
+  vs.innerHTML='<option value="">すべての販売者</option>'+vendors.map(v=>`<option value="${v}">${v}</option>`).join('');
+  if (cur) vs.value=cur;
+  const a=agg(m.rows);
+  const tR=a.reduce((s,r)=>s+r.revenue,0), tC=a.reduce((s,r)=>s+r.commission,0);
+  const tP=a.reduce((s,r)=>s+r.payout,0), tQ=a.reduce((s,r)=>s+r.qty,0);
+  document.getElementById('detail-summary').innerHTML=`
+    <div class="summary-card"><div class="sc-label">総販売数</div><div class="sc-value">${tQ.toLocaleString()}<span style="font-size:13px">個</span></div></div>
+    <div class="summary-card"><div class="sc-label">総売上合計</div><div class="sc-value accent">¥${tR.toLocaleString()}</div></div>
+    <div class="summary-card"><div class="sc-label">総手数料(20%)</div><div class="sc-value">¥${tC.toLocaleString()}</div></div>
+    <div class="summary-card"><div class="sc-label">総支払い金額</div><div class="sc-value" style="color:var(--success)">¥${tP.toLocaleString()}</div></div>`;
+  renderDetailTable();
+  document.getElementById('month-detail').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function doSort(k) {
+  if (S.sortKey===k) S.sortAsc=!S.sortAsc; else { S.sortKey=k; S.sortAsc=false; }
+  renderDetailTable();
+}
+function renderDetailTable() {
+  if (!S.curMonthId) return;
+  const m=S.records.find(r=>r.id===S.curMonthId); if (!m) return;
+  let rows=agg(m.rows);
+  const vf=document.getElementById('filter-vendor').value;
+  const qf=(document.getElementById('filter-q').value||'').toLowerCase();
+  if (vf) rows=rows.filter(r=>r.vendor===vf);
+  if (qf) rows=rows.filter(r=>r.name.toLowerCase().includes(qf));
+  const k=S.sortKey;
+  rows.sort((a,b)=>typeof a[k]==='string'?(S.sortAsc?a[k].localeCompare(b[k],'ja'):b[k].localeCompare(a[k],'ja')):(S.sortAsc?a[k]-b[k]:b[k]-a[k]));
+  const mBadge=s=>s==='full'?'<span class="badge badge-full">✓ 完全一致</span>':s==='seller'?'<span class="badge badge-seller">販売者のみ</span>':'<span class="badge badge-none">未照合</span>';
+  document.getElementById('detail-tbody').innerHTML=rows.map(r=>`<tr>
+    <td><span class="badge badge-vendor">${r.vendor}</span></td>
+    <td>${r.name}</td>
+    <td style="text-align:center">${mBadge(r.match)}</td>
+    <td class="num">${r.qty}</td>
+    <td class="num">¥${r.price.toLocaleString()}</td>
+    <td class="num">¥${r.revenue.toLocaleString()}</td>
+    <td class="num" style="color:var(--muted)">¥${r.commission.toLocaleString()}</td>
+    <td class="num" style="font-weight:600;color:var(--success)">¥${r.payout.toLocaleString()}</td>
+  </tr>`).join('');
+  const tR=rows.reduce((s,r)=>s+r.revenue,0), tC=rows.reduce((s,r)=>s+r.commission,0);
+  const tP=rows.reduce((s,r)=>s+r.payout,0), tQ=rows.reduce((s,r)=>s+r.qty,0);
+  document.getElementById('detail-tfoot').innerHTML=`<tr>
+    <td colspan="3">合計</td><td class="num">${tQ}</td><td></td>
+    <td class="num">¥${tR.toLocaleString()}</td>
+    <td class="num">¥${tC.toLocaleString()}</td>
+    <td class="num">¥${tP.toLocaleString()}</td></tr>`;
+}
+function exportCSV() {
+  if (!S.curMonthId) return;
+  const m=S.records.find(r=>r.id===S.curMonthId);
+  let rows=agg(m.rows);
+  const vf=document.getElementById('filter-vendor').value;
+  if (vf) rows=rows.filter(r=>r.vendor===vf);
+  const mLabel=s=>s==='full'?'完全一致':s==='seller'?'販売者のみ':'未照合';
+  const body=rows.map(r=>`"${r.vendor}","${r.name}","${mLabel(r.match)}",${r.qty},${r.price},${r.revenue},${r.commission},${r.payout}`).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF販売者,商品名,照合,販売数,単価,売上合計,手数料,支払い金額\n'+body],{type:'text/csv;charset=utf-8'}));
+  a.download=m.label+'_売上集計.csv'; a.click(); toast('CSVをダウンロードしました ✓');
+}
+
+// ===== Settlement =====
+function renderStlPanel() {
+  const sel=document.getElementById('stl-month');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— 月を選択 —</option>'+S.records.map(m=>`<option value="${m.id}">${m.label}</option>`).join('');
+  if (cur) { sel.value=cur; renderStlSellers(); }
+}
+function renderStlSellers() {
+  const mid=document.getElementById('stl-month').value;
+  const el=document.getElementById('stl-sellers');
+  if (!mid) { el.innerHTML='<div class="empty"><p>月を選択すると販売者カードが表示されます</p></div>'; return; }
+  const m=S.records.find(r=>r.id===mid); if (!m) return;
+  const vendors=[...new Set(m.rows.map(r=>r.vendor))];
+  if (!vendors.length) { el.innerHTML='<p style="color:var(--muted);font-size:13px">データがありません</p>'; return; }
+  el.innerHTML=`<div class="seller-grid">${vendors.map(v=>{
+    const s=S.sellers.find(x=>x.vendor===v)||{name:v,vendor:v};
+    const rows=agg(m.rows.filter(r=>r.vendor===v));
+    const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
+    const payout=tRev-Math.round(tRev*0.2);
+    return `<div class="seller-card" onclick="dlXLSX('${mid}','${v}')">
+      <div class="sc-name">${s.name}</div>
+      <div class="sc-info">
+        <span class="badge badge-vendor">${v}</span><br>
+        売上：¥${tRev.toLocaleString()} ／ 支払い：¥${payout.toLocaleString()}<br>
+        ${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank" onclick="event.stopPropagation()">🔗 スプレッドシートを開く</a>`:''}
+      </div>
+      <div style="margin-top:12px"><span class="btn btn-success btn-sm" style="pointer-events:none;font-size:12px">⬇ xlsx ダウンロード</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ===== XLSX Settlement Export =====
+function dlXLSX(monthId, vendor) {
+  const m=S.records.find(r=>r.id===monthId); if (!m) return;
+  const seller=S.sellers.find(s=>s.vendor===vendor)||{name:vendor,vendor};
+  const rows=agg(m.rows.filter(r=>r.vendor===vendor));
+  const tRev=rows.reduce((s,r)=>s+r.revenue,0);
+  const tQty=rows.reduce((s,r)=>s+r.qty,0);
+  const comm=Math.round(tRev*0.2);
+  const payout=tRev-comm;
+  const tfee=payout<20000?300:0;
+  const final=payout-tfee;
+  const today=new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'});
+
+  const wb=XLSX.utils.book_new();
+  const ws={};
+  const EC=XLSX.utils.encode_cell;
+  const mg=[];
+
+  function c(r,col,v,bold,sz,color,bg,alignH,fmt) {
+    const s={};
+    s.font={name:'Noto Sans JP', sz:sz||10, bold:!!bold};
+    if (color) s.font.color={rgb:color};
+    if (bg) s.fill={fgColor:{rgb:bg},patternType:'solid'};
+    const brd={style:'thin',color:{rgb:'D0C0B8'}};
+    s.border={top:brd,bottom:brd,left:brd,right:brd};
+    s.alignment={vertical:'center', wrapText:true};
+    if (alignH) s.alignment.horizontal=alignH;
+    const t=typeof v==='number'?'n':'s';
+    const cell={v,t,s};
+    if (fmt) cell.z=fmt;
+    ws[EC({r,c:col})]=cell;
+  }
+  function mg4(r,c1,c2) { mg.push({s:{r,c:c1},e:{r,c:c2}}); }
+
+  let R=0;
+  // Title
+  c(R,0,'Lavique ECショップ　委託販売 月次精算書',true,15,'3D2B35',null,'center');
+  mg4(R,0,3); R+=2;
+
+  // Recipient / sender
+  c(R,0,'宛先',true,9,'FFFFFF','5A3A40','center');
+  c(R,1,seller.name+'　様',true,13,'3D2B35',null,'left');
+  c(R,2,'発行者',true,9,'FFFFFF','5A3A40','center');
+  c(R,3,'Lavique・後藤あい',false,10,'3D2B35',null,'left');
+  R++;
+  c(R,0,'',false,10);
+  c(R,1,'',false,10);
+  c(R,2,'住所',true,9,'FFFFFF','5A3A40','center');
+  c(R,3,'広島県福山市南蔵王町2丁目3-35',false,10,'3D2B35',null,'left');
+  R++;
+  c(R,0,'');
+  c(R,1,'');
+  c(R,2,'電話',true,9,'FFFFFF','5A3A40','center');
+  c(R,3,'080-3894-4100',false,10,'3D2B35',null,'left');
+  R++;
+  c(R,0,'精算対象期間',true,9,'FFFFFF','5A3A40','center');
+  c(R,1,m.period||m.label,false,10,'3D2B35',null,'left');
+  c(R,2,'');
+  c(R,3,'');
+  mg4(R,1,3); R+=2;
+
+  // Product table header
+  ['商品名','単価(A)','販売数(B)','売上金額(C)'].forEach((h,ci)=>{
+    c(R,ci,h,true,10,'FFFFFF','3D2B35',ci===0?'left':'right');
+  }); R++;
+
+  // Product rows
+  rows.forEach(row=>{
+    c(R,0,row.name,false,10);
+    c(R,1,row.price,false,10,null,null,'right','#,##0');
+    c(R,2,row.qty,false,10,null,null,'right','#,##0');
+    c(R,3,row.revenue,false,10,null,null,'right','#,##0');
+    R++;
+  });
+
+  // Total row
+  c(R,0,'合計',true,10,'3D2B35','E8D5C8');
+  c(R,1,'',false,10,null,'E8D5C8');
+  c(R,2,tQty,true,10,'3D2B35','E8D5C8','right','#,##0');
+  c(R,3,tRev,true,10,'3D2B35','E8D5C8','right','#,##0');
+  R+=2;
+
+  // Calculation section
+  const calcs=[
+    ['当月売上合計','',tRev],
+    ['販売手数料(20%)',`${tRev.toLocaleString()} × 20%`,comm],
+    ['支払対象額',`${tRev.toLocaleString()} − ${comm.toLocaleString()}`,payout],
+    ['振込手数料',payout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担',tfee],
+  ];
+  calcs.forEach(([label,formula,amount])=>{
+    c(R,0,label,true,9,'FFFFFF','5A3A40');
+    c(R,1,formula,false,9,null,null,'center');
+    mg4(R,1,2);
+    c(R,3,amount,true,10,null,null,'right','#,##0');
+    R++;
+  });
+  // Final payout
+  c(R,0,'最終振込金額',true,12,'A0695A','FFF0EB');
+  c(R,1,'',false,10,null,'FFF0EB');
+  c(R,2,'',false,10,null,'FFF0EB');
+  c(R,3,final,true,14,'A0695A','FFF0EB','right','#,##0');
+  mg4(R,0,2); R+=2;
+
+  // Notes
+  c(R,0,'当月分の精算金額は上記の通りとなります。',false,10);
+  mg4(R,0,3); R++;
+  ['・20,000円未満の場合：振込手数料300円をご負担いただきます',
+   '・20,000円以上の場合：振込手数料は当方にて負担いたします'].forEach(note=>{
+    c(R,0,note,false,9,'7A5A5A'); mg4(R,0,3); R++;
+  }); R++;
+
+  // Checkboxes
+  ['□　振込を希望する','□　今月は振込不要（翌月へ繰り越し）'].forEach(ch=>{
+    c(R,0,ch,false,10); mg4(R,0,3); R++;
+  }); R++;
+  ['※ 振込希望の方は【◯月◯日】までにご返信ください。',
+   '※ 期日までにご連絡がない場合は翌月精算とさせていただきます。'].forEach(note=>{
+    c(R,0,note,false,9,'7A5A5A'); mg4(R,0,3); R++;
+  }); R++;
+
+  // Bank info
+  if (seller.bank) {
+    c(R,0,'振込先口座',true,9,'FFFFFF','5A3A40');
+    c(R,1,`${seller.bank}　${seller.banktype}　${seller.banknum}　${seller.bankname}`,false,10);
+    mg4(R,1,3); R++;
+  }
+
+  // Issue date
+  c(R,0,'発行日',true,9,'FFFFFF','5A3A40');
+  c(R,1,today,false,10); mg4(R,1,3);
+
+  ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:R,c:3}});
+  ws['!merges']=mg;
+  ws['!cols']=[{wch:36},{wch:20},{wch:10},{wch:16}];
+  const heights=Array(R+1).fill({hpt:22});
+  heights[0]={hpt:36};
+  ws['!rows']=heights;
+
+  XLSX.utils.book_append_sheet(wb,ws,'月次精算書');
+  XLSX.writeFile(wb,`${m.label}_精算書_${seller.name}.xlsx`);
+  toast(`${seller.name} 様の精算書をダウンロードしました ✓`);
+}
+
+// ===== Drag & Drop =====
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop',e=>{
+  e.preventDefault(); dz.classList.remove('drag-over');
+  const f=e.dataTransfer.files[0];
+  if (f){const r=new FileReader();r.onload=ev=>parseCSV(ev.target.result,f.name);r.readAsText(f,'UTF-8');}
+});
+
+// ===== Init =====
+hydrate();
+renderSellersList();
+</script>
+</body>
+</html>
