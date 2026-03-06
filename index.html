@@ -305,7 +305,7 @@ tfoot td.num { text-align: right; }
 
 <script>
 // ===== State =====
-const S = { sellers:[], records:[], curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false };
+const S = { sellers:[], records:[], curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false, pendingImport:null };
 
 function persist() {
   try { localStorage.setItem('lv2_s', JSON.stringify(S.sellers)); localStorage.setItem('lv2_r', JSON.stringify(S.records)); } catch(e){}
@@ -560,6 +560,9 @@ function parseCSV(text, filename) {
   const nNone=rows.filter(r=>r.match==='none').length;
   const vendors=[...new Set(rows.map(r=>r.vendor))];
 
+  // 保存待ちデータを変数に保持（onclick経由のJSON渡しだと日本語で壊れるため）
+  S.pendingImport = {label, period, rows, existIdx};
+
   const el=document.getElementById('import-result');
   el.style.display='block';
   document.getElementById('import-body').innerHTML=`
@@ -573,18 +576,20 @@ function parseCSV(text, filename) {
     </div>
     ${existIdx>=0?`<div style="background:#fff8e8;border:1px solid #e8d080;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13px">⚠️ <strong>${label}</strong> のデータは保存済みです。上書きしますか？</div>`:''}
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="save-btn" onclick="saveRecord(${JSON.stringify(label)},${JSON.stringify(period)},${JSON.stringify(rows)},${existIdx})">
+      <button class="btn btn-primary" id="save-btn" onclick="saveRecord()">
         ${existIdx>=0?'⬆ 上書き保存':'💾 月次データとして保存'}
       </button>
       <button class="btn btn-secondary" onclick="switchTab('sales')">→ 月次集計を確認</button>
     </div>`;
 }
-function saveRecord(label, period, rows, existIdx) {
-  const rec={id:Date.now()+'', label, period, rows, savedAt:new Date().toLocaleDateString('ja-JP')};
-  if (existIdx>=0) S.records[existIdx]=rec; else S.records.unshift(rec);
+function saveRecord() {
+  const p=S.pendingImport; if (!p) { toast('保存するデータがありません','err'); return; }
+  const rec={id:Date.now()+'', label:p.label, period:p.period, rows:p.rows, savedAt:new Date().toLocaleDateString('ja-JP')};
+  if (p.existIdx>=0) S.records[p.existIdx]=rec; else S.records.unshift(rec);
+  S.pendingImport=null;
   persist();
   document.getElementById('import-result').style.display='none';
-  toast(`${label} を保存しました ✓`);
+  toast(`${rec.label} を保存しました ✓`);
   switchTab('sales');
 }
 
