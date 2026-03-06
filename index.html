@@ -550,9 +550,8 @@ function parseCSV(text, filename) {
   });
 
   const fmt=d=>`${d.getFullYear()}年${d.getMonth()+1}月`;
-  const fmtFull=d=>`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
   const label=minD&&maxD&&minD.getMonth()===maxD.getMonth()?fmt(minD):(minD?fmt(minD)+'〜'+fmt(maxD):filename);
-  const period=minD&&maxD?fmtFull(minD)+' 〜 '+fmtFull(maxD):'';
+  const period=label;
 
   const existIdx=S.records.findIndex(m=>m.label===label);
   const nFull=rows.filter(r=>r.match==='full').length;
@@ -597,8 +596,9 @@ function saveRecord() {
 function agg(rows) {
   const map={};
   rows.forEach(r=>{
-    const k=r.vendor+'|||'+r.name;
-    if (!map[k]) map[k]={vendor:r.vendor,name:r.name,price:r.price,qty:0,match:r.match||'none'};
+    // sellerIdがあればそれを優先キーに使う
+    const k=(r.sellerId||r.vendor)+'|||'+r.name;
+    if (!map[k]) map[k]={vendor:r.vendor, sellerId:r.sellerId||null, name:r.name, price:r.price, qty:0, match:r.match||'none'};
     map[k].qty+=r.qty;
   });
   return Object.values(map).map(r=>{
@@ -639,11 +639,20 @@ function showDetail(id) {
   const m=S.records.find(r=>r.id===id); if (!m) return;
   document.getElementById('month-detail').style.display='block';
   document.getElementById('detail-label').textContent=m.label+' 月次集計';
-  const vendors=[...new Set(m.rows.map(r=>r.vendor))];
+
+  // 販売者フィルター：sellerIdで一意に特定
+  const sellerIds=[...new Set(m.rows.map(r=>r.sellerId).filter(Boolean))];
+  const unmatched=[...new Set(m.rows.filter(r=>!r.sellerId).map(r=>r.vendor))];
   const vs=document.getElementById('filter-vendor');
   const cur=vs.value;
-  vs.innerHTML='<option value="">すべての販売者</option>'+vendors.map(v=>`<option value="${v}">${v}</option>`).join('');
+  vs.innerHTML='<option value="">すべての販売者</option>'
+    +sellerIds.map(sid=>{
+      const s=S.sellers.find(x=>x.id===sid);
+      return `<option value="sid:${sid}">${s?s.name:sid}</option>`;
+    }).join('')
+    +unmatched.map(v=>`<option value="vendor:${v}">${v}（未照合）</option>`).join('');
   if (cur) vs.value=cur;
+
   const a=agg(m.rows);
   const tR=a.reduce((s,r)=>s+r.revenue,0), tC=a.reduce((s,r)=>s+r.commission,0);
   const tP=a.reduce((s,r)=>s+r.payout,0), tQ=a.reduce((s,r)=>s+r.qty,0);
@@ -665,13 +674,25 @@ function renderDetailTable() {
   let rows=agg(m.rows);
   const vf=document.getElementById('filter-vendor').value;
   const qf=(document.getElementById('filter-q').value||'').toLowerCase();
-  if (vf) rows=rows.filter(r=>r.vendor===vf);
+  if (vf) {
+    if (vf.startsWith('sid:')) {
+      const sid=vf.slice(4);
+      rows=rows.filter(r=>r.sellerId===sid);
+    } else if (vf.startsWith('vendor:')) {
+      const v=vf.slice(7);
+      rows=rows.filter(r=>!r.sellerId&&r.vendor===v);
+    }
+  }
   if (qf) rows=rows.filter(r=>r.name.toLowerCase().includes(qf));
   const k=S.sortKey;
   rows.sort((a,b)=>typeof a[k]==='string'?(S.sortAsc?a[k].localeCompare(b[k],'ja'):b[k].localeCompare(a[k],'ja')):(S.sortAsc?a[k]-b[k]:b[k]-a[k]));
   const mBadge=s=>s==='full'?'<span class="badge badge-full">✓ 完全一致</span>':s==='seller'?'<span class="badge badge-seller">販売者のみ</span>':'<span class="badge badge-none">未照合</span>';
+  const sellerLabel=r=>{
+    if (r.sellerId) { const s=S.sellers.find(x=>x.id===r.sellerId); return s?s.name:r.vendor; }
+    return r.vendor;
+  };
   document.getElementById('detail-tbody').innerHTML=rows.map(r=>`<tr>
-    <td><span class="badge badge-vendor">${r.vendor}</span></td>
+    <td><span class="badge badge-vendor">${sellerLabel(r)}</span></td>
     <td>${r.name}</td>
     <td style="text-align:center">${mBadge(r.match)}</td>
     <td class="num">${r.qty}</td>
@@ -713,27 +734,46 @@ function renderStlSellers() {
   const el=document.getElementById('stl-sellers');
   if (!mid) { el.innerHTML='<div class="empty"><p>月を選択すると販売者カードが表示されます</p></div>'; return; }
   const m=S.records.find(r=>r.id===mid); if (!m) return;
-  const vendors=[...new Set(m.rows.map(r=>r.vendor))];
-  if (!vendors.length) { el.innerHTML='<p style="color:var(--muted);font-size:13px">データがありません</p>'; return; }
-  el.innerHTML=`<div class="seller-grid">${vendors.map(v=>{
-    const s=S.sellers.find(x=>x.vendor===v)||{name:v,vendor:v};
-    const rows=agg(m.rows.filter(r=>r.vendor===v));
+
+  // sellerIdで一意な販売者リストを作成
+  const sellerIds=[...new Set(m.rows.map(r=>r.sellerId).filter(Boolean))];
+  // 未照合（sellerIdなし）のvendorも表示
+  const unmatchedVendors=[...new Set(m.rows.filter(r=>!r.sellerId).map(r=>r.vendor))];
+
+  if (!sellerIds.length && !unmatchedVendors.length) {
+    el.innerHTML='<p style="color:var(--muted);font-size:13px">データがありません</p>'; return;
+  }
+
+  const sellerCards=sellerIds.map(sid=>{
+    const s=S.sellers.find(x=>x.id===sid)||{name:sid, id:sid};
+    const rows=agg(m.rows.filter(r=>r.sellerId===sid));
     const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
     const payout=tRev-Math.round(tRev*0.2);
     return `<div class="seller-card" style="cursor:default">
       <div class="sc-name">${s.name}</div>
       <div class="sc-info">
-        <span class="badge badge-vendor">${v}</span><br>
         売上：¥${tRev.toLocaleString()} ／ 支払い：¥${payout.toLocaleString()}<br>
         ${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank">🔗 スプレッドシートを開く</a>`:''}
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${v}')">⬇ xlsx</button>
-        <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${v}')">📄 PDF</button>
-        <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${v}')">🖼 PNG（utage用）</button>
+        <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${sid}')">⬇ xlsx</button>
+        <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${sid}')">📄 PDF</button>
+        <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${sid}')">🖼 PNG（utage用）</button>
       </div>
     </div>`;
-  }).join('')}</div>`;
+  });
+
+  const unmatchedCards=unmatchedVendors.map(v=>{
+    const rows=agg(m.rows.filter(r=>!r.sellerId&&r.vendor===v));
+    const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
+    return `<div class="seller-card" style="cursor:default;opacity:0.6">
+      <div class="sc-name" style="color:var(--muted)">${v}</div>
+      <div class="sc-info"><span class="badge badge-none">未照合</span><br>売上：¥${tRev.toLocaleString()}</div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)">販売者登録・商品登録が必要です</div>
+    </div>`;
+  });
+
+  el.innerHTML=`<div class="seller-grid">${[...sellerCards,...unmatchedCards].join('')}</div>`;
 }
 
 // ===== XLSX Settlement Export =====
@@ -871,13 +911,9 @@ function dlXLSX(monthId, vendor) {
     c(R,0,note,false,9,'7A5A5A'); mg4(R,0,3); R++;
   }); R++;
 
-  // Checkboxes
-  ['□　振込を希望する','□　今月は振込不要（翌月へ繰り越し）'].forEach(ch=>{
-    c(R,0,ch,false,10); mg4(R,0,3); R++;
-  }); R++;
-  ['※ 振込希望の方は【◯月◯日】までにご返信ください。',
-   '※ 期日までにご連絡がない場合は翌月精算とさせていただきます。'].forEach(note=>{
-    c(R,0,note,false,9,'7A5A5A'); mg4(R,0,3); R++;
+  // 連絡案内
+  ['今月15日までに振込希望の旨と振込先銀行を転写紙協会のLINEにてご連絡ください。'].forEach(note=>{
+    c(R,0,note,false,10,'3D2B35'); mg4(R,0,3); R++;
   }); R++;
 
   // Bank info
@@ -904,27 +940,33 @@ function dlXLSX(monthId, vendor) {
 }
 
 // ===== PDF Settlement Export =====
-function buildSettlementData(monthId, vendor) {
+function buildSettlementData(monthId, sellerId) {
   const m=S.records.find(r=>r.id===monthId); if (!m) return null;
-  const seller=S.sellers.find(s=>s.vendor===vendor)||{name:vendor,vendor};
-  const soldRows=agg(m.rows.filter(r=>r.vendor===vendor));
+  const seller=S.sellers.find(s=>s.id===sellerId)||{name:sellerId, id:sellerId, products:[]};
+
+  // このsellerIdに紐づく売上行
+  const soldRows=agg(m.rows.filter(r=>r.sellerId===sellerId));
+
+  // 登録済み商品で売れていないものを0件で追加
   const registeredProducts=seller.products||[];
   const zeroRows=registeredProducts
     .filter(p=>!soldRows.find(r=>r.name===p.name))
-    .map(p=>({vendor,name:p.name,price:p.price,qty:0,revenue:0,commission:0,payout:0}));
+    .map(p=>({sellerId, vendor:seller.vendor||'', name:p.name, price:p.price, qty:0, revenue:0, commission:0, payout:0}));
+
   let rows;
   if (registeredProducts.length) {
     const orderedSold=registeredProducts.map(p=>soldRows.find(r=>r.name===p.name)).filter(Boolean);
     const unregisteredSold=soldRows.filter(r=>!registeredProducts.find(p=>p.name===r.name));
     rows=[...orderedSold,...unregisteredSold,...zeroRows];
   } else { rows=[...soldRows,...zeroRows]; }
+
   const tRev=rows.reduce((s,r)=>s+r.revenue,0);
   const tQty=rows.reduce((s,r)=>s+r.qty,0);
   const comm=Math.round(tRev*0.2);
   const payout=tRev-comm;
   const tfee=payout<20000?300:0;
   const final=payout-tfee;
-  return {m,seller,rows,tRev,tQty,comm,payout,tfee,final};
+  return {m, seller, rows, tRev, tQty, comm, payout, tfee, final};
 }
 
 function dlPDF(monthId, vendor) {
@@ -1017,14 +1059,9 @@ function dlPDF(monthId, vendor) {
   doc.text('・20,000円未満の場合：振込手数料300円をご負担いただきます', margin, y); y+=5;
   doc.text('・20,000円以上の場合：振込手数料は当方にて負担いたします', margin, y); y+=10;
 
-  // チェックボックス
+  // 連絡案内
   doc.setFontSize(10); doc.setTextColor(40,40,40);
-  doc.text('□　振込を希望する', margin, y); y+=6;
-  doc.text('□　今月は振込不要（翌月へ繰り越し）', margin, y); y+=10;
-
-  doc.setFontSize(9); doc.setTextColor(80,80,80);
-  doc.text('※ 振込希望の方は【◯月◯日】までにご返信ください。', margin, y); y+=5;
-  doc.text('※ 期日までにご連絡がない場合は翌月精算とさせていただきます。', margin, y); y+=10;
+  doc.text('今月15日までに振込希望の旨と振込先銀行を転写紙協会のLINEにてご連絡ください。', margin, y); y+=10;
 
   // 口座情報
   if (seller.bank) {
@@ -1079,13 +1116,8 @@ async function dlIMG(monthId, vendor) {
       ・20,000円未満の場合：振込手数料300円をご負担いただきます<br>
       ・20,000円以上の場合：振込手数料は当方にて負担いたします
     </div>
-    <div class="sp-check">
-      □　振込を希望する<br>
-      □　今月は振込不要（翌月へ繰り越し）
-    </div>
     <div class="sp-notes">
-      ※ 振込希望の方は【◯月◯日】までにご返信ください。<br>
-      ※ 期日までにご連絡がない場合は翌月精算とさせていただきます。
+      今月15日までに振込希望の旨と振込先銀行を転写紙協会のLINEにてご連絡ください。
     </div>
     ${seller.bank?`<div class="sp-bank">振込先口座：${seller.bank}　${seller.banktype}　${seller.banknum}　${seller.bankname}</div>`:''}
     <div class="sp-footer">発行日：${today}</div>
