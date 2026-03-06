@@ -163,7 +163,7 @@ tfoot td.num { text-align: right; }
     <div class="card-title">➕ 販売者を登録</div>
     <div class="form-row">
       <div class="form-group"><label>販売者名</label><input id="s-name" placeholder="例：河崎友美"></div>
-      <div class="form-group"><label>ShopifyベンダーID（Vendor列）</label><input id="s-vendor" placeholder="例：papillon room"></div>
+      <div class="form-group"><label>ShopifyベンダーID（任意・補助照合用）</label><input id="s-vendor" placeholder="例：papillon room"></div>
       <div class="form-group"><label>メールアドレス</label><input id="s-email" type="email" placeholder="example@email.com"></div>
       <div class="form-group"><label>電話番号</label><input id="s-phone" placeholder="090-0000-0000"></div>
     </div>
@@ -333,7 +333,7 @@ function toast(msg, type='ok') {
 function saveSeller() {
   const name = document.getElementById('s-name').value.trim();
   const vendor = document.getElementById('s-vendor').value.trim();
-  if (!name||!vendor) { toast('販売者名とVendor名は必須です','err'); return; }
+  if (!name) { toast('販売者名は必須です','err'); return; }
   S.sellers.push({ id:Date.now()+'', name, vendor,
     email:document.getElementById('s-email').value.trim(),
     phone:document.getElementById('s-phone').value.trim(),
@@ -473,7 +473,7 @@ function saveEditSeller() {
   const s=S.sellers.find(x=>x.id===editSellerId); if (!s) return;
   const name=document.getElementById('e-name').value.trim();
   const vendor=document.getElementById('e-vendor').value.trim();
-  if (!name||!vendor) { toast('販売者名とVendor名は必須です','err'); return; }
+  if (!name) { toast('販売者名は必須です','err'); return; }
   s.name=name; s.vendor=vendor;
   s.email=document.getElementById('e-email').value.trim();
   s.phone=document.getElementById('e-phone').value.trim();
@@ -523,7 +523,7 @@ function parseCSV(text, filename) {
     raw.push({name,qty,price,vendor});
   }
 
-  // Aggregate
+  // Aggregate（商品名＋Vendorでまとめる）
   const map={};
   raw.forEach(r=>{
     const k=r.vendor+'|||'+r.name;
@@ -531,12 +531,22 @@ function parseCSV(text, filename) {
     map[k].qty+=r.qty;
   });
 
-  // Match + use registered price if available
+  // 照合：まず商品名で全販売者を検索（商品名は販売者間で必ず一意）
+  // 次にVendor名でも補助照合
   const rows=Object.values(map).map(r=>{
-    const sm=S.sellers.find(s=>s.vendor===r.vendor);
-    const pm=sm?(sm.products||[]).find(p=>p.name===r.name):null;
-    const match=sm&&pm?'full':sm?'seller':'none';
-    return {...r, price:pm?pm.price:r.price, match};
+    // ① 商品名で完全一致する登録商品を探す
+    let matchedSeller=null, matchedProduct=null;
+    for (const s of S.sellers) {
+      const p=(s.products||[]).find(p=>p.name===r.name);
+      if (p) { matchedSeller=s; matchedProduct=p; break; }
+    }
+    // ② 商品名で見つからなければVendor名で販売者を探す
+    if (!matchedSeller) matchedSeller=S.sellers.find(s=>s.vendor===r.vendor);
+
+    const match=matchedSeller&&matchedProduct?'full':matchedSeller?'seller':'none';
+    // 照合できた販売者のVendor名で上書き（CSV側のvendorを正として使いつつ、販売者名表示に使う）
+    const displayVendor=matchedSeller?matchedSeller.vendor:r.vendor;
+    return {...r, vendor:displayVendor, price:matchedProduct?matchedProduct.price:r.price, match, sellerId:matchedSeller?.id||null};
   });
 
   const fmt=d=>`${d.getFullYear()}年${d.getMonth()+1}月`;
