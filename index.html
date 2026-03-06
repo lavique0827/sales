@@ -241,6 +241,7 @@ tfoot td.num { text-align: right; }
             <th class="sort" onclick="doSort('revenue')" style="text-align:right">売上合計</th>
             <th style="text-align:right">手数料(20%)</th>
             <th class="sort" onclick="doSort('payout')" style="text-align:right">支払い金額</th>
+            <th style="width:40px"></th>
           </tr></thead>
           <tbody id="detail-tbody"></tbody>
           <tfoot id="detail-tfoot"></tfoot>
@@ -691,23 +692,74 @@ function renderDetailTable() {
     if (r.sellerId) { const s=S.sellers.find(x=>x.id===r.sellerId); return s?s.name:r.vendor; }
     return r.vendor;
   };
-  document.getElementById('detail-tbody').innerHTML=rows.map(r=>`<tr>
-    <td><span class="badge badge-vendor">${sellerLabel(r)}</span></td>
-    <td>${r.name}</td>
-    <td style="text-align:center">${mBadge(r.match)}</td>
-    <td class="num">${r.qty}</td>
-    <td class="num">¥${r.price.toLocaleString()}</td>
-    <td class="num">¥${r.revenue.toLocaleString()}</td>
-    <td class="num" style="color:var(--muted)">¥${r.commission.toLocaleString()}</td>
-    <td class="num" style="font-weight:600;color:var(--success)">¥${r.payout.toLocaleString()}</td>
-  </tr>`).join('');
+  // 行ごとにユニークキー（sellerId or vendor + 商品名）
+  const rowKey=r=>(r.sellerId||r.vendor)+'|||'+r.name;
+  document.getElementById('detail-tbody').innerHTML=rows.map(r=>{
+    const key=encodeURIComponent(rowKey(r));
+    return `<tr id="drow-${key}">
+      <td><span class="badge badge-vendor">${sellerLabel(r)}</span></td>
+      <td>${r.name}</td>
+      <td style="text-align:center">${mBadge(r.match)}</td>
+      <td class="num">${r.qty}</td>
+      <td class="num">¥${r.price.toLocaleString()}</td>
+      <td class="num">¥${r.revenue.toLocaleString()}</td>
+      <td class="num" style="color:var(--muted)">¥${r.commission.toLocaleString()}</td>
+      <td class="num" style="font-weight:600;color:var(--success)">¥${r.payout.toLocaleString()}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="editDetailRow(${JSON.stringify(rowKey(r))})">✏️</button></td>
+    </tr>`;
+  }).join('');
   const tR=rows.reduce((s,r)=>s+r.revenue,0), tC=rows.reduce((s,r)=>s+r.commission,0);
   const tP=rows.reduce((s,r)=>s+r.payout,0), tQ=rows.reduce((s,r)=>s+r.qty,0);
   document.getElementById('detail-tfoot').innerHTML=`<tr>
     <td colspan="3">合計</td><td class="num">${tQ}</td><td></td>
     <td class="num">¥${tR.toLocaleString()}</td>
     <td class="num">¥${tC.toLocaleString()}</td>
-    <td class="num">¥${tP.toLocaleString()}</td></tr>`;
+    <td class="num">¥${tP.toLocaleString()}</td><td></td></tr>`;
+}
+
+function editDetailRow(rowKey) {
+  const m=S.records.find(r=>r.id===S.curMonthId); if (!m) return;
+  const [sellerPart, name] = rowKey.split('|||');
+  // 該当するrawデータを探す
+  const rawRows = m.rows.filter(r=>(r.sellerId||r.vendor)===sellerPart && r.name===name);
+  if (!rawRows.length) return;
+  const sample = rawRows[0];
+  const totalQty = rawRows.reduce((s,r)=>s+r.qty, 0);
+
+  const key = encodeURIComponent(rowKey);
+  const row = document.getElementById('drow-'+key); if (!row) return;
+  row.innerHTML=`
+    <td colspan="9">
+      <div class="p-edit-row" style="flex-wrap:wrap;gap:10px;padding:12px 14px">
+        <span style="font-size:12px;font-weight:600;color:var(--deep);min-width:180px">${name}</span>
+        <label style="font-size:11px;color:var(--muted)">販売数</label>
+        <input id="dedit-qty" type="number" value="${totalQty}" style="width:70px">
+        <label style="font-size:11px;color:var(--muted)">単価</label>
+        <input id="dedit-price" type="number" value="${sample.price}" style="width:90px">
+        <button class="btn btn-primary btn-sm" onclick="saveDetailRow(${JSON.stringify(rowKey)})">保存</button>
+        <button class="btn btn-secondary btn-sm" onclick="renderDetailTable()">キャンセル</button>
+      </div>
+    </td>`;
+}
+
+function saveDetailRow(rowKey) {
+  const m=S.records.find(r=>r.id===S.curMonthId); if (!m) return;
+  const [sellerPart, name] = rowKey.split('|||');
+  const newQty = parseInt(document.getElementById('dedit-qty').value)||0;
+  const newPrice = parseInt(document.getElementById('dedit-price').value)||0;
+
+  // 該当する元データを全部削除して1行に統合
+  m.rows = m.rows.filter(r=>!((r.sellerId||r.vendor)===sellerPart && r.name===name));
+  const sample = {
+    sellerId: sellerPart.match(/^\d{13}$/) ? sellerPart : null,
+    vendor: sellerPart,
+    name, price: newPrice, qty: newQty, match:'full'
+  };
+  m.rows.push(sample);
+
+  persist();
+  showDetail(S.curMonthId);
+  toast('データを更新しました ✓');
 }
 function exportCSV() {
   if (!S.curMonthId) return;
@@ -735,34 +787,32 @@ function renderStlSellers() {
   if (!mid) { el.innerHTML='<div class="empty"><p>月を選択すると販売者カードが表示されます</p></div>'; return; }
   const m=S.records.find(r=>r.id===mid); if (!m) return;
 
-  // sellerIdで一意な販売者リストを作成
-  const sellerIds=[...new Set(m.rows.map(r=>r.sellerId).filter(Boolean))];
-  // 未照合（sellerIdなし）のvendorも表示
+  if (!S.sellers.length) { el.innerHTML='<p style="color:var(--muted);font-size:13px">販売者が登録されていません</p>'; return; }
+
+  // 未照合vendorも表示
   const unmatchedVendors=[...new Set(m.rows.filter(r=>!r.sellerId).map(r=>r.vendor))];
 
-  if (!sellerIds.length && !unmatchedVendors.length) {
-    el.innerHTML='<p style="color:var(--muted);font-size:13px">データがありません</p>'; return;
-  }
-
-  const sellerCards=sellerIds.map(sid=>{
-    const s=S.sellers.find(x=>x.id===sid)||{name:sid, id:sid};
-    const rows=agg(m.rows.filter(r=>r.sellerId===sid));
+  // 登録済み全販売者（売上ゼロでも全員表示）
+  const sellerCards=S.sellers.map(s=>{
+    const rows=agg(m.rows.filter(r=>r.sellerId===s.id));
     const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
     const payout=tRev-Math.round(tRev*0.2);
-    return `<div class="seller-card" style="cursor:default">
-      <div class="sc-name">${s.name}</div>
+    const isZero=tRev===0;
+    return `<div class="seller-card" style="cursor:default;${isZero?'opacity:0.65;border-style:dashed':''}">
+      <div class="sc-name">${s.name}${isZero?'<span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">販売なし</span>':''}</div>
       <div class="sc-info">
         売上：¥${tRev.toLocaleString()} ／ 支払い：¥${payout.toLocaleString()}<br>
         ${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank">🔗 スプレッドシートを開く</a>`:''}
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${sid}')">⬇ xlsx</button>
-        <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${sid}')">📄 PDF</button>
-        <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${sid}')">🖼 PNG（utage用）</button>
+        <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${s.id}')">⬇ xlsx</button>
+        <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${s.id}')">📄 PDF</button>
+        <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${s.id}')">🖼 PNG（utage用）</button>
       </div>
     </div>`;
   });
 
+  // 未照合カード
   const unmatchedCards=unmatchedVendors.map(v=>{
     const rows=agg(m.rows.filter(r=>!r.sellerId&&r.vendor===v));
     const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
