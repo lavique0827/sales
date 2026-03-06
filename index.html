@@ -6,6 +6,9 @@
 <title>Lavique 委託販売管理</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500;600&family=Noto+Sans+JP:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 :root {
   --cream: #faf8f5; --warm-white: #fff9f5; --blush: #e8d5c8; --rose: #c9a090;
@@ -111,6 +114,31 @@ tfoot td.num { text-align: right; }
 .p-edit-row { display:flex; gap:8px; align-items:center; padding:8px 14px; background:#fff8f5; border-bottom:1px solid var(--light-border); }
 .p-edit-row input { padding:6px 10px; border:1px solid var(--rose); border-radius:6px; font-size:13px; font-family:'Noto Sans JP',sans-serif; outline:none; }
 .p-edit-row input:focus { box-shadow:0 0 0 2px rgba(201,160,144,0.2); }
+/* 精算書プレビュー（画像生成用の非表示DOM） */
+#settlement-preview-area { position:fixed; left:-9999px; top:0; width:680px; background:white; font-family:'Noto Sans JP',sans-serif; padding:40px; box-sizing:border-box; }
+.sp-title { font-size:20px; font-weight:700; color:#3d2b35; text-align:center; margin-bottom:8px; }
+.sp-divider { border:none; border-top:2px solid #c9a090; margin-bottom:16px; }
+.sp-meta { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; font-size:12px; }
+.sp-meta-left .recipient { font-size:16px; font-weight:700; color:#3d2b35; }
+.sp-meta-right { text-align:right; color:#7a5a5a; line-height:1.8; }
+.sp-period { background:#faf8f5; border:1px solid #e8d5c8; border-radius:6px; padding:8px 14px; font-size:12px; margin-bottom:16px; }
+.sp-period strong { color:#a0695a; }
+.sp-table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px; }
+.sp-table thead th { background:#3d2b35; color:white; padding:8px 12px; text-align:left; }
+.sp-table thead th:not(:first-child) { text-align:right; }
+.sp-table tbody td { padding:7px 12px; border-bottom:1px solid #efe6e0; }
+.sp-table tbody td:not(:first-child) { text-align:right; }
+.sp-table tbody tr.zero td { color:#aaa; background:#f8f5f3; }
+.sp-table tfoot td { padding:8px 12px; background:#e8d5c8; font-weight:700; border-top:2px solid #c9a090; }
+.sp-table tfoot td:not(:first-child) { text-align:right; }
+.sp-calc { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px; }
+.sp-calc td { padding:7px 12px; border-bottom:1px solid #efe6e0; }
+.sp-calc td:last-child { text-align:right; font-weight:600; }
+.sp-calc tr.final td { background:#fff0eb; color:#a0695a; font-size:14px; font-weight:700; }
+.sp-notes { font-size:10px; color:#7a5a5a; line-height:1.9; margin-bottom:12px; }
+.sp-check { font-size:12px; line-height:2.2; margin-bottom:12px; }
+.sp-bank { font-size:11px; color:#5a3a40; background:#faf8f5; border:1px solid #e8d5c8; border-radius:6px; padding:8px 14px; margin-bottom:12px; }
+.sp-footer { display:flex; justify-content:flex-end; font-size:10px; color:#aaa; }
 </style>
 </head>
 <body>
@@ -237,6 +265,9 @@ tfoot td.num { text-align: right; }
 </div>
 
 </div><!-- /main -->
+
+<!-- 精算書画像生成用 非表示エリア -->
+<div id="settlement-preview-area"></div>
 
 <!-- 販売者編集モーダル -->
 <div class="modal-overlay" id="edit-modal" style="display:none" onclick="if(event.target===this)closeEditModal()">
@@ -674,14 +705,18 @@ function renderStlSellers() {
     const rows=agg(m.rows.filter(r=>r.vendor===v));
     const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
     const payout=tRev-Math.round(tRev*0.2);
-    return `<div class="seller-card" onclick="dlXLSX('${mid}','${v}')">
+    return `<div class="seller-card" style="cursor:default">
       <div class="sc-name">${s.name}</div>
       <div class="sc-info">
         <span class="badge badge-vendor">${v}</span><br>
         売上：¥${tRev.toLocaleString()} ／ 支払い：¥${payout.toLocaleString()}<br>
-        ${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank" onclick="event.stopPropagation()">🔗 スプレッドシートを開く</a>`:''}
+        ${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank">🔗 スプレッドシートを開く</a>`:''}
       </div>
-      <div style="margin-top:12px"><span class="btn btn-success btn-sm" style="pointer-events:none;font-size:12px">⬇ xlsx ダウンロード</span></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${v}')">⬇ xlsx</button>
+        <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${v}')">📄 PDF</button>
+        <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${v}')">🖼 PNG（utage用）</button>
+      </div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -690,7 +725,28 @@ function renderStlSellers() {
 function dlXLSX(monthId, vendor) {
   const m=S.records.find(r=>r.id===monthId); if (!m) return;
   const seller=S.sellers.find(s=>s.vendor===vendor)||{name:vendor,vendor};
-  const rows=agg(m.rows.filter(r=>r.vendor===vendor));
+
+  // 売れた商品（集計済み）
+  const soldRows=agg(m.rows.filter(r=>r.vendor===vendor));
+
+  // 登録済み商品で売れていないものを0件で追加
+  const registeredProducts=seller.products||[];
+  const zeroRows=registeredProducts
+    .filter(p=>!soldRows.find(r=>r.name===p.name))
+    .map(p=>({vendor, name:p.name, price:p.price, qty:0, revenue:0, commission:0, payout:0, match:'full'}));
+
+  // 登録商品順（sold→zero）でマージ。登録商品がある場合は登録順に並べる
+  let rows;
+  if (registeredProducts.length) {
+    const orderedSold = registeredProducts
+      .map(p=>soldRows.find(r=>r.name===p.name))
+      .filter(Boolean);
+    const unregisteredSold = soldRows.filter(r=>!registeredProducts.find(p=>p.name===r.name));
+    rows = [...orderedSold, ...unregisteredSold, ...zeroRows];
+  } else {
+    rows = [...soldRows, ...zeroRows];
+  }
+
   const tRev=rows.reduce((s,r)=>s+r.revenue,0);
   const tQty=rows.reduce((s,r)=>s+r.qty,0);
   const comm=Math.round(tRev*0.2);
@@ -754,10 +810,13 @@ function dlXLSX(monthId, vendor) {
 
   // Product rows
   rows.forEach(row=>{
-    c(R,0,row.name,false,10);
-    c(R,1,row.price,false,10,null,null,'right','#,##0');
-    c(R,2,row.qty,false,10,null,null,'right','#,##0');
-    c(R,3,row.revenue,false,10,null,null,'right','#,##0');
+    const isZero=row.qty===0;
+    const txtColor=isZero?'AAAAAA':null;
+    const bg=isZero?'F8F5F3':null;
+    c(R,0,row.name,false,10,txtColor,bg);
+    c(R,1,row.price,false,10,txtColor,bg,'right','#,##0');
+    c(R,2,row.qty,false,10,txtColor,bg,'right','#,##0');
+    c(R,3,row.revenue,false,10,txtColor,bg,'right','#,##0');
     R++;
   });
 
@@ -829,7 +888,207 @@ function dlXLSX(monthId, vendor) {
   toast(`${seller.name} 様の精算書をダウンロードしました ✓`);
 }
 
-// ===== Drag & Drop =====
+// ===== PDF Settlement Export =====
+function buildSettlementData(monthId, vendor) {
+  const m=S.records.find(r=>r.id===monthId); if (!m) return null;
+  const seller=S.sellers.find(s=>s.vendor===vendor)||{name:vendor,vendor};
+  const soldRows=agg(m.rows.filter(r=>r.vendor===vendor));
+  const registeredProducts=seller.products||[];
+  const zeroRows=registeredProducts
+    .filter(p=>!soldRows.find(r=>r.name===p.name))
+    .map(p=>({vendor,name:p.name,price:p.price,qty:0,revenue:0,commission:0,payout:0}));
+  let rows;
+  if (registeredProducts.length) {
+    const orderedSold=registeredProducts.map(p=>soldRows.find(r=>r.name===p.name)).filter(Boolean);
+    const unregisteredSold=soldRows.filter(r=>!registeredProducts.find(p=>p.name===r.name));
+    rows=[...orderedSold,...unregisteredSold,...zeroRows];
+  } else { rows=[...soldRows,...zeroRows]; }
+  const tRev=rows.reduce((s,r)=>s+r.revenue,0);
+  const tQty=rows.reduce((s,r)=>s+r.qty,0);
+  const comm=Math.round(tRev*0.2);
+  const payout=tRev-comm;
+  const tfee=payout<20000?300:0;
+  const final=payout-tfee;
+  return {m,seller,rows,tRev,tQty,comm,payout,tfee,final};
+}
+
+function dlPDF(monthId, vendor) {
+  const d=buildSettlementData(monthId,vendor); if (!d) return;
+  const {m,seller,rows,tRev,tQty,comm,payout,tfee,final}=d;
+  const today=new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'});
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+
+  // フォント設定（日本語対応のためbase64埋め込みは不要、ブラウザのPDFレンダリングに委ねる）
+  const W=210, margin=18;
+  let y=20;
+
+  // タイトル
+  doc.setFontSize(16); doc.setFont('helvetica','bold');
+  doc.text('Lavique ECショップ　委託販売 月次精算書', W/2, y, {align:'center'});
+  y+=10;
+  doc.setDrawColor(160,105,90); doc.setLineWidth(0.5);
+  doc.line(margin, y, W-margin, y); y+=8;
+
+  // 宛先・発行者
+  doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text(seller.name+'  様', margin, y); 
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.setTextColor(80,80,80);
+  doc.text('Lavique・後藤あい', W-margin, y, {align:'right'});
+  y+=5;
+  doc.text('広島県福山市南蔵王町2丁目3-35　TEL: 080-3894-4100', W-margin, y, {align:'right'});
+  y+=8;
+
+  // 精算期間
+  doc.setFontSize(10); doc.setTextColor(40,40,40);
+  doc.setFillColor(250,248,245); doc.roundedRect(margin, y-4, W-margin*2, 10, 2, 2, 'F');
+  doc.setFont('helvetica','bold'); doc.text('精算対象期間：', margin+3, y+2);
+  doc.setFont('helvetica','normal'); doc.text(m.period||m.label, margin+32, y+2);
+  y+=14;
+
+  // 商品テーブル
+  doc.autoTable({
+    startY: y,
+    margin: {left:margin, right:margin},
+    head: [['商品名','単価(A)','販売数(B)','売上金額(C)']],
+    body: rows.map(r=>[
+      r.name,
+      r.qty===0?'¥'+r.price.toLocaleString()+' (-)' : '¥'+r.price.toLocaleString(),
+      r.qty,
+      '¥'+r.revenue.toLocaleString()
+    ]),
+    foot: [['合計','',tQty,'¥'+tRev.toLocaleString()]],
+    headStyles: {fillColor:[61,43,53], textColor:255, fontSize:10, fontStyle:'bold'},
+    footStyles: {fillColor:[232,213,200], textColor:[44,31,38], fontStyle:'bold', fontSize:10},
+    bodyStyles: {fontSize:9},
+    columnStyles: {0:{cellWidth:'auto'}, 1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}},
+    didParseCell(data) {
+      if (data.section==='body') {
+        const row=rows[data.row.index];
+        if (row&&row.qty===0) { data.cell.styles.textColor=[170,170,170]; data.cell.styles.fillColor=[248,245,243]; }
+      }
+    },
+    showFoot:'lastPage',
+  });
+  y=doc.lastAutoTable.finalY+8;
+
+  // 計算テーブル
+  doc.autoTable({
+    startY: y,
+    margin: {left:margin, right:margin},
+    body: [
+      ['当月売上合計','','¥'+tRev.toLocaleString()],
+      ['販売手数料(20%)', tRev.toLocaleString()+' × 20%', '¥'+comm.toLocaleString()],
+      ['支払対象額', tRev.toLocaleString()+' − '+comm.toLocaleString(), '¥'+payout.toLocaleString()],
+      ['振込手数料', payout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担', '¥'+tfee.toLocaleString()],
+      ['最終振込金額','','¥'+final.toLocaleString()],
+    ],
+    bodyStyles: {fontSize:10},
+    columnStyles: {0:{fontStyle:'bold', cellWidth:55}, 1:{fontSize:9, textColor:[100,80,80]}, 2:{halign:'right', fontStyle:'bold'}},
+    didParseCell(data) {
+      if (data.row.index===4) {
+        data.cell.styles.fillColor=[255,240,235];
+        data.cell.styles.textColor=[160,105,90];
+        data.cell.styles.fontSize=12;
+      }
+    },
+  });
+  y=doc.lastAutoTable.finalY+10;
+
+  // 注記
+  doc.setFontSize(9); doc.setTextColor(80,80,80);
+  doc.text('当月分の精算金額は上記の通りとなります。', margin, y); y+=5;
+  doc.text('・20,000円未満の場合：振込手数料300円をご負担いただきます', margin, y); y+=5;
+  doc.text('・20,000円以上の場合：振込手数料は当方にて負担いたします', margin, y); y+=10;
+
+  // チェックボックス
+  doc.setFontSize(10); doc.setTextColor(40,40,40);
+  doc.text('□　振込を希望する', margin, y); y+=6;
+  doc.text('□　今月は振込不要（翌月へ繰り越し）', margin, y); y+=10;
+
+  doc.setFontSize(9); doc.setTextColor(80,80,80);
+  doc.text('※ 振込希望の方は【◯月◯日】までにご返信ください。', margin, y); y+=5;
+  doc.text('※ 期日までにご連絡がない場合は翌月精算とさせていただきます。', margin, y); y+=10;
+
+  // 口座情報
+  if (seller.bank) {
+    doc.setFontSize(9);
+    doc.text('振込先口座：'+seller.bank+'　'+seller.banktype+'　'+seller.banknum+'　'+seller.bankname, margin, y); y+=8;
+  }
+
+  // 発行日
+  doc.setTextColor(120,100,100);
+  doc.text('発行日：'+today, W-margin, y, {align:'right'});
+
+  doc.save(`${m.label}_精算書_${seller.name}.pdf`);
+  toast(`${seller.name} 様のPDFをダウンロードしました ✓`);
+}
+
+// ===== PNG Image Export (utage用) =====
+async function dlIMG(monthId, vendor) {
+  const d=buildSettlementData(monthId,vendor); if (!d) return;
+  const {m,seller,rows,tRev,tQty,comm,payout,tfee,final}=d;
+  const today=new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'});
+
+  const area=document.getElementById('settlement-preview-area');
+  area.innerHTML=`
+    <div class="sp-title">Lavique ECショップ　委託販売 月次精算書</div>
+    <hr class="sp-divider">
+    <div class="sp-meta">
+      <div class="sp-meta-left"><div class="recipient">${seller.name}　様</div></div>
+      <div class="sp-meta-right">Lavique・後藤あい<br>広島県福山市南蔵王町2丁目3-35<br>TEL: 080-3894-4100</div>
+    </div>
+    <div class="sp-period"><strong>精算対象期間：</strong>${m.period||m.label}</div>
+    <table class="sp-table">
+      <thead><tr><th>商品名</th><th>単価(A)</th><th>販売数(B)</th><th>売上金額(C)</th></tr></thead>
+      <tbody>
+        ${rows.map(r=>`<tr class="${r.qty===0?'zero':''}">
+          <td>${r.name}</td>
+          <td>¥${r.price.toLocaleString()}</td>
+          <td>${r.qty}</td>
+          <td>¥${r.revenue.toLocaleString()}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr><td>合計</td><td></td><td>${tQty}</td><td>¥${tRev.toLocaleString()}</td></tr></tfoot>
+    </table>
+    <table class="sp-calc">
+      <tr><td>当月売上合計</td><td></td><td>¥${tRev.toLocaleString()}</td></tr>
+      <tr><td>販売手数料(20%)</td><td style="font-size:10px;color:#9a7a7a">${tRev.toLocaleString()} × 20%</td><td>¥${comm.toLocaleString()}</td></tr>
+      <tr><td>支払対象額</td><td style="font-size:10px;color:#9a7a7a">${tRev.toLocaleString()} − ${comm.toLocaleString()}</td><td>¥${payout.toLocaleString()}</td></tr>
+      <tr><td>振込手数料</td><td style="font-size:10px;color:#9a7a7a">${payout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担'}</td><td>¥${tfee.toLocaleString()}</td></tr>
+      <tr class="final"><td>最終振込金額</td><td></td><td>¥${final.toLocaleString()}</td></tr>
+    </table>
+    <div class="sp-notes">
+      当月分の精算金額は上記の通りとなります。<br>
+      ・20,000円未満の場合：振込手数料300円をご負担いただきます<br>
+      ・20,000円以上の場合：振込手数料は当方にて負担いたします
+    </div>
+    <div class="sp-check">
+      □　振込を希望する<br>
+      □　今月は振込不要（翌月へ繰り越し）
+    </div>
+    <div class="sp-notes">
+      ※ 振込希望の方は【◯月◯日】までにご返信ください。<br>
+      ※ 期日までにご連絡がない場合は翌月精算とさせていただきます。
+    </div>
+    ${seller.bank?`<div class="sp-bank">振込先口座：${seller.bank}　${seller.banktype}　${seller.banknum}　${seller.bankname}</div>`:''}
+    <div class="sp-footer">発行日：${today}</div>
+  `;
+
+  toast('画像を生成中... ⏳');
+  try {
+    const canvas=await html2canvas(area,{scale:2, backgroundColor:'#ffffff', useCORS:true});
+    const link=document.createElement('a');
+    link.href=canvas.toDataURL('image/png');
+    link.download=`${m.label}_精算書_${seller.name}.png`;
+    link.click();
+    toast(`${seller.name} 様のPNGをダウンロードしました ✓`);
+  } catch(e) {
+    toast('画像生成に失敗しました','err');
+  }
+  area.innerHTML='';
+}
 const dz=document.getElementById('drop-zone');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
