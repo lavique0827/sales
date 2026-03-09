@@ -313,13 +313,22 @@ tfoot td.num { text-align: right; }
 
 <script>
 // ===== State =====
-const S = { sellers:[], records:[], curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false, pendingImport:null };
+const S = { sellers:[], records:[], payments:{}, curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false, pendingImport:null };
+// payments 構造: { "monthId_sellerId": true } → 支払い済みフラグ
 
 function persist() {
-  try { localStorage.setItem('lv2_s', JSON.stringify(S.sellers)); localStorage.setItem('lv2_r', JSON.stringify(S.records)); } catch(e){}
+  try {
+    localStorage.setItem('lv2_s', JSON.stringify(S.sellers));
+    localStorage.setItem('lv2_r', JSON.stringify(S.records));
+    localStorage.setItem('lv2_p', JSON.stringify(S.payments));
+  } catch(e){}
 }
 function hydrate() {
-  try { S.sellers = JSON.parse(localStorage.getItem('lv2_s')||'[]'); S.records = JSON.parse(localStorage.getItem('lv2_r')||'[]'); } catch(e){}
+  try {
+    S.sellers = JSON.parse(localStorage.getItem('lv2_s')||'[]');
+    S.records = JSON.parse(localStorage.getItem('lv2_r')||'[]');
+    S.payments = JSON.parse(localStorage.getItem('lv2_p')||'{}');
+  } catch(e){}
 }
 
 // ===== UI helpers =====
@@ -772,6 +781,41 @@ function exportCSV() {
   a.download=m.label+'_売上集計.csv'; a.click(); toast('CSVをダウンロードしました ✓');
 }
 
+// ===== Payment Status =====
+function payKey(monthId, sellerId) { return monthId+'_'+sellerId; }
+
+function togglePayment(monthId, sellerId) {
+  const k = payKey(monthId, sellerId);
+  S.payments[k] = !S.payments[k];
+  persist();
+  renderStlSellers();
+  toast(S.payments[k] ? '支払い済みにしました ✓' : '支払い済みを解除しました');
+}
+
+function isPaid(monthId, sellerId) {
+  return !!S.payments[payKey(monthId, sellerId)];
+}
+
+// 未払い繰越額を計算（当月より前の全月で未払い分を合算）
+function getCarryover(sellerId, currentMonthId) {
+  const curMonth = S.records.find(r=>r.id===currentMonthId);
+  if (!curMonth) return [];
+  // 月をIDでソート（IDはDate.now()なので数値順＝時系列順）
+  const prevMonths = S.records
+    .filter(r => r.id < currentMonthId && !isPaid(r.id, sellerId))
+    .sort((a,b) => a.id - b.id);
+
+  return prevMonths.map(m => {
+    const soldRows = agg(m.rows.filter(r=>r.sellerId===sellerId));
+    const tRev = soldRows.reduce((s,r)=>s+r.revenue, 0);
+    if (tRev === 0) return null;
+    const comm = Math.round(tRev * 0.2);
+    const payout = tRev - comm;
+    return { label: m.label, tRev, comm, payout };
+  }).filter(Boolean);
+}
+
+
 // ===== Settlement =====
 function renderStlPanel() {
   const sel=document.getElementById('stl-month');
@@ -796,12 +840,25 @@ function renderStlSellers() {
     const tRev=rows.reduce((sum,r)=>sum+r.revenue,0);
     const payout=tRev-Math.round(tRev*0.2);
     const isZero=tRev===0;
+    const paid=isPaid(mid, s.id);
+    const carryovers=getCarryover(s.id, mid);
+    const carryTotal=carryovers.reduce((s,c)=>s+c.payout,0);
+    const carryHTML=carryovers.length?`<div style="margin-top:6px;font-size:11px;color:#b06040;background:#fff3ee;border-radius:6px;padding:6px 10px">
+      繰越あり：${carryovers.map(c=>`${c.label} ¥${c.payout.toLocaleString()}`).join('　／　')}
+      <span style="font-weight:700">　合計 ¥${carryTotal.toLocaleString()}</span>
+    </div>`:'';
     return `<div class="seller-card" style="cursor:default;${isZero?'opacity:0.65;border-style:dashed':''}">
-      <div class="sc-name">${s.name}${isZero?'<span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">販売なし</span>':''}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="sc-name">${s.name}${isZero?'<span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">販売なし</span>':''}</div>
+        <button onclick="togglePayment('${mid}','${s.id}')" style="font-size:11px;padding:4px 10px;border-radius:20px;border:none;cursor:pointer;font-weight:600;background:${paid?'#4caf50':'#e0d0c8'};color:${paid?'white':'#7a5a50'}">
+          ${paid?'✓ 支払い済み':'○ 未払い'}
+        </button>
+      </div>
       <div class="sc-info">
         売上：¥${tRev.toLocaleString()} ／ 支払い：¥${payout.toLocaleString()}<br>
         ${s.sheetUrl?`<a class="url-link" href="${s.sheetUrl}" target="_blank">🔗 スプレッドシートを開く</a>`:''}
       </div>
+      ${carryHTML}
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${s.id}')">⬇ xlsx</button>
         <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${s.id}')">📄 PDF</button>
@@ -825,37 +882,9 @@ function renderStlSellers() {
 }
 
 // ===== XLSX Settlement Export =====
-function dlXLSX(monthId, vendor) {
-  const m=S.records.find(r=>r.id===monthId); if (!m) return;
-  const seller=S.sellers.find(s=>s.vendor===vendor)||{name:vendor,vendor};
-
-  // 売れた商品（集計済み）
-  const soldRows=agg(m.rows.filter(r=>r.vendor===vendor));
-
-  // 登録済み商品で売れていないものを0件で追加
-  const registeredProducts=seller.products||[];
-  const zeroRows=registeredProducts
-    .filter(p=>!soldRows.find(r=>r.name===p.name))
-    .map(p=>({vendor, name:p.name, price:p.price, qty:0, revenue:0, commission:0, payout:0, match:'full'}));
-
-  // 登録商品順（sold→zero）でマージ。登録商品がある場合は登録順に並べる
-  let rows;
-  if (registeredProducts.length) {
-    const orderedSold = registeredProducts
-      .map(p=>soldRows.find(r=>r.name===p.name))
-      .filter(Boolean);
-    const unregisteredSold = soldRows.filter(r=>!registeredProducts.find(p=>p.name===r.name));
-    rows = [...orderedSold, ...unregisteredSold, ...zeroRows];
-  } else {
-    rows = [...soldRows, ...zeroRows];
-  }
-
-  const tRev=rows.reduce((s,r)=>s+r.revenue,0);
-  const tQty=rows.reduce((s,r)=>s+r.qty,0);
-  const comm=Math.round(tRev*0.2);
-  const payout=tRev-comm;
-  const tfee=payout<20000?300:0;
-  const final=payout-tfee;
+function dlXLSX(monthId, sellerId) {
+  const d=buildSettlementData(monthId, sellerId); if (!d) return;
+  const {m, seller, rows, tRev, tQty, comm, payout, tfee, final, carryovers, carryTotal, carryPayout}=d;
   const today=new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric'});
 
   const wb=XLSX.utils.book_new();
@@ -934,11 +963,22 @@ function dlXLSX(monthId, vendor) {
   const calcs=[
     ['当月売上合計','',tRev],
     ['販売手数料(20%)',`${tRev.toLocaleString()} × 20%`,comm],
-    ['支払対象額',`${tRev.toLocaleString()} − ${comm.toLocaleString()}`,payout],
-    ['振込手数料',payout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担',tfee],
+    ['当月支払対象額',`${tRev.toLocaleString()} − ${comm.toLocaleString()}`,payout],
   ];
-  calcs.forEach(([label,formula,amount])=>{
-    c(R,0,label,true,9,'FFFFFF','5A3A40');
+  // 繰越行
+  carryovers.forEach(cv=>{
+    calcs.push([cv.label+'　繰越','前月未払い分',cv.payout]);
+  });
+  if (carryovers.length) {
+    calcs.push(['繰越合計支払対象額','',carryPayout]);
+  }
+  calcs.push(['振込手数料',carryPayout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担',tfee]);
+
+  calcs.forEach(([label,formula,amount],i)=>{
+    const isCarry=carryovers.length && i>=3 && i<3+carryovers.length;
+    const bg=isCarry?'FFF8E0':'5A3A40';
+    const fg=isCarry?'A06020':'FFFFFF';
+    c(R,0,label,true,9,fg,bg);
     c(R,1,formula,false,9,null,null,'center');
     mg4(R,1,2);
     c(R,3,amount,true,10,null,null,'right','#,##0');
@@ -992,10 +1032,8 @@ function buildSettlementData(monthId, sellerId) {
   const m=S.records.find(r=>r.id===monthId); if (!m) return null;
   const seller=S.sellers.find(s=>s.id===sellerId)||{name:sellerId, id:sellerId, products:[]};
 
-  // このsellerIdに紐づく売上行
+  // 当月売上
   const soldRows=agg(m.rows.filter(r=>r.sellerId===sellerId));
-
-  // 登録済み商品で売れていないものを0件で追加
   const registeredProducts=seller.products||[];
   const zeroRows=registeredProducts
     .filter(p=>!soldRows.find(r=>r.name===p.name))
@@ -1008,13 +1046,19 @@ function buildSettlementData(monthId, sellerId) {
     rows=[...orderedSold,...unregisteredSold,...zeroRows];
   } else { rows=[...soldRows,...zeroRows]; }
 
+  // 繰越データ（未払い前月分）
+  const carryovers=getCarryover(sellerId, monthId);
+  const carryTotal=carryovers.reduce((s,c)=>s+c.payout,0);
+
   const tRev=rows.reduce((s,r)=>s+r.revenue,0);
   const tQty=rows.reduce((s,r)=>s+r.qty,0);
   const comm=Math.round(tRev*0.2);
   const payout=tRev-comm;
-  const tfee=payout<20000?300:0;
-  const final=payout-tfee;
-  return {m, seller, rows, tRev, tQty, comm, payout, tfee, final};
+  // 繰越を加算した最終支払い額
+  const carryPayout = payout + carryTotal;
+  const tfee=carryPayout<20000?300:0;
+  const final=carryPayout-tfee;
+  return {m, seller, rows, tRev, tQty, comm, payout, tfee, final, carryovers, carryTotal, carryPayout};
 }
 
 function dlPDF(monthId, vendor) {
@@ -1079,23 +1123,38 @@ function dlPDF(monthId, vendor) {
   y=doc.lastAutoTable.finalY+8;
 
   // 計算テーブル
+  const calcBody=[
+    ['当月売上合計','','¥'+tRev.toLocaleString()],
+    ['販売手数料(20%)', tRev.toLocaleString()+' × 20%', '¥'+comm.toLocaleString()],
+    ['当月支払対象額', tRev.toLocaleString()+' − '+comm.toLocaleString(), '¥'+payout.toLocaleString()],
+  ];
+  // 繰越行
+  carryovers.forEach(c=>{
+    calcBody.push([c.label+'　繰越', '前月未払い分', '¥'+c.payout.toLocaleString()]);
+  });
+  if (carryovers.length) {
+    calcBody.push(['繰越合計支払対象額','','¥'+carryPayout.toLocaleString()]);
+  }
+  calcBody.push(['振込手数料', carryPayout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担', '¥'+tfee.toLocaleString()]);
+  calcBody.push(['最終振込金額','','¥'+final.toLocaleString()]);
+  const finalRowIdx=calcBody.length-1;
+  const carryRowIdxes=carryovers.map((_,i)=>3+i);
+
   doc.autoTable({
     startY: y,
     margin: {left:margin, right:margin},
-    body: [
-      ['当月売上合計','','¥'+tRev.toLocaleString()],
-      ['販売手数料(20%)', tRev.toLocaleString()+' × 20%', '¥'+comm.toLocaleString()],
-      ['支払対象額', tRev.toLocaleString()+' − '+comm.toLocaleString(), '¥'+payout.toLocaleString()],
-      ['振込手数料', payout<20000?'20,000円未満のためご負担':'20,000円以上のため当方負担', '¥'+tfee.toLocaleString()],
-      ['最終振込金額','','¥'+final.toLocaleString()],
-    ],
+    body: calcBody,
     bodyStyles: {fontSize:10},
     columnStyles: {0:{fontStyle:'bold', cellWidth:55}, 1:{fontSize:9, textColor:[100,80,80]}, 2:{halign:'right', fontStyle:'bold'}},
     didParseCell(data) {
-      if (data.row.index===4) {
+      if (data.row.index===finalRowIdx) {
         data.cell.styles.fillColor=[255,240,235];
         data.cell.styles.textColor=[160,105,90];
         data.cell.styles.fontSize=12;
+      }
+      if (carryRowIdxes.includes(data.row.index)) {
+        data.cell.styles.fillColor=[255,248,230];
+        data.cell.styles.textColor=[160,100,40];
       }
     },
   });
@@ -1187,7 +1246,7 @@ async function dlIMG(monthId, vendor) {
 
 // ===== Backup / Restore =====
 function exportBackup() {
-  const data = { sellers: S.sellers, records: S.records, exportedAt: new Date().toLocaleString('ja-JP') };
+  const data = { sellers: S.sellers, records: S.records, payments: S.payments, exportedAt: new Date().toLocaleString('ja-JP') };
   const json = JSON.stringify(data, null, 2);
   const date = new Date().toLocaleDateString('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'-');
   const a = document.createElement('a');
@@ -1206,6 +1265,7 @@ function importBackup(inp) {
       if (!data.sellers || !data.records) throw new Error();
       S.sellers = data.sellers;
       S.records = data.records;
+      S.payments = data.payments || {};
       persist();
       renderSellersList();
       renderMonthGrid();
