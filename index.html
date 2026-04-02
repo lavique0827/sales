@@ -786,11 +786,14 @@ function saveDetailRow(i) {
 function exportCSV() {
   if (!S.curMonthId) return;
   const m=S.records.find(r=>r.id===S.curMonthId);
-  let rows=agg(m.rows);
-  const vf=document.getElementById('filter-vendor').value;
-  if (vf) rows=rows.filter(r=>r.vendor===vf);
+  // 画面に表示中の行をそのまま使う（フィルター・ソート・販売者名反映済み）
+  const rows=S._detailRows||[];
   const mLabel=s=>s==='full'?'完全一致':s==='seller'?'販売者のみ':'未照合';
-  const body=rows.map(r=>`"${r.vendor}","${r.name}","${mLabel(r.match)}",${r.qty},${r.price},${r.revenue},${r.commission},${r.payout}`).join('\n');
+  const sellerLabel=r=>{
+    if (r.sellerId){ const s=S.sellers.find(x=>x.id===r.sellerId); return s?s.name:r.vendor; }
+    return r.vendor||'';
+  };
+  const body=rows.map(r=>`"${sellerLabel(r)}","${r.name}","${mLabel(r.match)}",${r.qty},${r.price},${r.revenue},${r.commission},${r.payout}`).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF販売者,商品名,照合,販売数,単価,売上合計,手数料,支払い金額\n'+body],{type:'text/csv;charset=utf-8'}));
   a.download=m.label+'_売上集計.csv'; a.click(); toast('CSVをダウンロードしました ✓');
