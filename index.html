@@ -741,10 +741,19 @@ function editDetailRow(i) {
   const rawRows=m.rows.filter(x=>(x.sellerId||x.vendor)===sellerPart && x.name===r.name);
   const totalQty=rawRows.reduce((s,x)=>s+x.qty,0);
   const row=document.getElementById('drow-'+i); if (!row) return;
+  // 販売者ドロップダウン
+  const sellerOptions=S.sellers.map(s=>
+    `<option value="${s.id}" ${s.id===r.sellerId?'selected':''}>${s.name}</option>`
+  ).join('');
   row.innerHTML=`
     <td colspan="9">
       <div class="p-edit-row" style="flex-wrap:wrap;gap:10px;padding:12px 14px">
         <span style="font-size:12px;font-weight:600;color:var(--deep);min-width:180px">${r.name}</span>
+        <label style="font-size:11px;color:var(--muted)">販売者</label>
+        <select id="dedit-seller" style="padding:5px 8px;border:1px solid var(--rose);border-radius:6px;font-size:12px;font-family:'Noto Sans JP',sans-serif">
+          <option value="">— 未割当 —</option>
+          ${sellerOptions}
+        </select>
         <label style="font-size:11px;color:var(--muted)">販売数</label>
         <input id="dedit-qty" type="number" value="${totalQty}" style="width:70px">
         <label style="font-size:11px;color:var(--muted)">単価</label>
@@ -761,9 +770,15 @@ function saveDetailRow(i) {
   const sellerPart=r.sellerId||r.vendor;
   const newQty=parseInt(document.getElementById('dedit-qty').value)||0;
   const newPrice=parseInt(document.getElementById('dedit-price').value)||0;
+  const newSellerId=document.getElementById('dedit-seller').value||null;
+  const newSeller=newSellerId?S.sellers.find(s=>s.id===newSellerId):null;
   // 元データを削除して1行に統合
   m.rows=m.rows.filter(x=>!((x.sellerId||x.vendor)===sellerPart && x.name===r.name));
-  m.rows.push({sellerId:r.sellerId||null, vendor:r.vendor, name:r.name, price:newPrice, qty:newQty, match:'full'});
+  m.rows.push({
+    sellerId: newSellerId||null,
+    vendor: newSeller?newSeller.name:(r.vendor||''),
+    name: r.name, price: newPrice, qty: newQty, match:'full'
+  });
   persist();
   showDetail(S.curMonthId);
   toast('データを更新しました ✓');
