@@ -261,10 +261,12 @@ tfoot td.num { text-align: right; }
 <!-- 精算書発行 -->
 <div class="panel" id="panel-settlement">
   <div class="card">
-    <div class="card-title">🗓 精算対象月を選択
-      <select id="stl-month" onchange="renderStlSellers()" style="margin-left:16px;padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none">
+    <div class="card-title" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px">
+      <span>🗓 精算対象月を選択</span>
+      <select id="stl-month" onchange="renderStlSellers()" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none">
         <option value="">— 月を選択 —</option>
       </select>
+      <button class="btn btn-sm" style="background:#7ab8a0;color:white;font-size:12px" onclick="dlMonthlyCSV()">📥 月次一覧CSV</button>
     </div>
     <div id="stl-sellers">
       <div class="empty"><p>月を選択すると販売者カードが表示されます</p></div>
@@ -861,9 +863,10 @@ function renderStlSellers() {
     const paid=isPaid(mid, s.id);
     const carryovers=getCarryover(s.id, mid);
     const carryTotal=carryovers.reduce((s,c)=>s+c.payout,0);
-    const carryHTML=carryovers.length?`<div style="margin-top:6px;font-size:11px;color:#b06040;background:#fff3ee;border-radius:6px;padding:6px 10px">
-      繰越あり：${carryovers.map(c=>`${c.label} ¥${c.payout.toLocaleString()}`).join('　／　')}
-      <span style="font-weight:700">　合計 ¥${carryTotal.toLocaleString()}</span>
+    const carryHTML=carryovers.length?`<div style="margin-top:6px;font-size:11px;color:#b06040;background:#fff3ee;border-radius:6px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <div>繰越あり：${carryovers.map(c=>`${c.label} ¥${c.payout.toLocaleString()}`).join('　／　')}
+      <span style="font-weight:700">　合計 ¥${carryTotal.toLocaleString()}</span></div>
+      <button onclick="undoCarryoverPaid('${mid}','${s.id}')" style="font-size:10px;padding:2px 8px;border-radius:12px;border:1px solid #c8a060;background:white;color:#9a7030;cursor:pointer">↩ 取り消し</button>
     </div>`:'';
     return `<div class="seller-card" style="cursor:default;${isZero?'opacity:0.65;border-style:dashed':''}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -882,6 +885,7 @@ function renderStlSellers() {
         <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${s.id}')">📄 PDF</button>
         <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${s.id}')">🖼 PNG（utage用）</button>
         <button class="btn btn-sm" style="background:#7ab8a0;color:white" onclick="dlSettlementCSV('${mid}','${s.id}')">📥 CSV</button>
+        ${carryovers.length ? `<button class="btn btn-sm" style="background:#c8a060;color:white" onclick="markCarryoverPaid('${mid}','${s.id}')">💰 繰越支払い済</button>` : ''}
       </div>
     </div>`;
   });
@@ -900,7 +904,82 @@ function renderStlSellers() {
   el.innerHTML=`<div class="seller-grid">${[...sellerCards,...unmatchedCards].join('')}</div>`;
 }
 
-// ===== Settlement CSV Export =====
+// ===== Carryover Paid =====
+function markCarryoverPaid(monthId, sellerId) {
+  const carryovers = getCarryover(sellerId, monthId);
+  if (!carryovers.length) return;
+  const names = carryovers.map(c=>c.label).join('・');
+  if (!confirm(`${names} の繰越分を支払い済みにします。\n（対象月を「支払い済み」にマークします）\nよろしいですか？`)) return;
+  // 対象の前月を全て支払い済みにする
+  const prevMonths = S.records
+    .filter(r => r.id < monthId && !isPaid(r.id, sellerId))
+    .sort((a,b)=>a.id-b.id);
+  prevMonths.forEach(m => {
+    const soldRows = agg(m.rows.filter(r=>r.sellerId===sellerId));
+    const tRev = soldRows.reduce((s,r)=>s+r.revenue,0);
+    if (tRev > 0) S.payments[payKey(m.id, sellerId)] = true;
+  });
+  persist();
+  renderStlSellers();
+  toast('繰越を支払い済みにしました ✓');
+}
+
+function undoCarryoverPaid(monthId, sellerId) {
+  // 直前に支払い済みにした前月分を全て未払いに戻す
+  const prevPaidMonths = S.records
+    .filter(r => r.id < monthId && isPaid(r.id, sellerId))
+    .sort((a,b)=>b.id-a.id);
+  if (!prevPaidMonths.length) { toast('取り消せる繰越支払いがありません','err'); return; }
+  const names = prevPaidMonths.map(m=>m.label).join('・');
+  if (!confirm(`${names} の支払い済みを取り消します。\nよろしいですか？`)) return;
+  prevPaidMonths.forEach(m => {
+    delete S.payments[payKey(m.id, sellerId)];
+  });
+  persist();
+  renderStlSellers();
+  toast('繰越支払いを取り消しました');
+}
+
+// ===== Monthly All-Sellers CSV =====
+function dlMonthlyCSV() {
+  const mid = document.getElementById('stl-month').value;
+  if (!mid) { toast('月を選択してください','err'); return; }
+  const m = S.records.find(r=>r.id===mid); if (!m) return;
+
+  const lines = ['\uFEFF名前,商品名,単価,個数,小計,合計（支払額）,繰越金'];
+
+  S.sellers.forEach(s => {
+    const d = buildSettlementData(mid, s.id);
+    if (!d) return;
+    const {rows, tRev, payout, carryovers, carryTotal, final} = d;
+    if (tRev === 0 && carryovers.length === 0) return; // 売上も繰越もない人はスキップ
+
+    // 明細行
+    rows.filter(r=>r.qty>0).forEach(r => {
+      lines.push(`"${s.name}","${r.name}",${r.price},${r.qty},${r.revenue},,`);
+    });
+    // 合計行
+    lines.push(`"${s.name}","当月合計",,${rows.reduce((s,r)=>s+r.qty,0)},${tRev},${payout},`);
+    // 繰越行
+    carryovers.forEach(c => {
+      lines.push(`"${s.name}","繰越（${c.label}）",,,,，${c.payout}`);
+    });
+    // 最終
+    if (carryovers.length) {
+      lines.push(`"${s.name}","最終振込金額",,,,,${final}`);
+    }
+    // 空行（区切り）
+    lines.push(',,,,,,');
+  });
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'}));
+  a.download = `${m.label}_月次精算一覧.csv`;
+  a.click();
+  toast('月次一覧CSVをダウンロードしました ✓');
+}
+
+
 function dlSettlementCSV(monthId, sellerId) {
   const d=buildSettlementData(monthId, sellerId); if (!d) return;
   const {m, seller, rows, tRev, tQty, comm, payout, carryovers, carryTotal, carryPayout, tfee, final}=d;
