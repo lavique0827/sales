@@ -954,15 +954,21 @@ function dlMonthlyCSV() {
     const {rows, tRev, payout, carryovers, carryTotal, final} = d;
     if (tRev === 0 && carryovers.length === 0) return;
 
-    // 明細行（名前は最初の1行だけ）
     const soldRows = rows.filter(r=>r.qty>0);
-    soldRows.forEach((r, i) => {
-      const name = i===0 ? `"${s.name}"` : '';
+    let nameUsed = false;
+
+    // 明細行（名前は最初の1行だけ）
+    soldRows.forEach(r => {
+      const name = !nameUsed ? `"${s.name}"` : '';
+      nameUsed = true;
       lines.push(`${name},"${r.name}",${r.price},${r.qty},${r.revenue},,`);
     });
-    // 合計行
-    const firstBlank = soldRows.length > 0 ? '' : `"${s.name}"`;
-    lines.push(`,"当月合計",,${rows.reduce((s,r)=>s+r.qty,0)},${tRev},${payout},`);
+
+    // 当月売上ゼロでも名前を出す
+    const firstCol = !nameUsed ? `"${s.name}"` : '';
+    nameUsed = true;
+    lines.push(`${firstCol},"当月合計",,${soldRows.reduce((s,r)=>s+r.qty,0)},${tRev},${payout},`);
+
     // 繰越行
     carryovers.forEach(c => {
       lines.push(`,"繰越（${c.label}）",,,,,${c.payout}`);
