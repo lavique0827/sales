@@ -881,6 +881,7 @@ function renderStlSellers() {
         <button class="btn btn-success btn-sm" onclick="dlXLSX('${mid}','${s.id}')">⬇ xlsx</button>
         <button class="btn btn-primary btn-sm" onclick="dlPDF('${mid}','${s.id}')">📄 PDF</button>
         <button class="btn btn-sm" style="background:#e8a0b0;color:white" onclick="dlIMG('${mid}','${s.id}')">🖼 PNG（utage用）</button>
+        <button class="btn btn-sm" style="background:#7ab8a0;color:white" onclick="dlSettlementCSV('${mid}','${s.id}')">📥 CSV</button>
       </div>
     </div>`;
   });
@@ -899,7 +900,46 @@ function renderStlSellers() {
   el.innerHTML=`<div class="seller-grid">${[...sellerCards,...unmatchedCards].join('')}</div>`;
 }
 
-// ===== XLSX Settlement Export =====
+// ===== Settlement CSV Export =====
+function dlSettlementCSV(monthId, sellerId) {
+  const d=buildSettlementData(monthId, sellerId); if (!d) return;
+  const {m, seller, rows, tRev, tQty, comm, payout, carryovers, carryTotal, carryPayout, tfee, final}=d;
+
+  const lines=['\uFEFF名前,月,商品名,単価,個数,小計'];
+
+  // 明細行
+  rows.forEach(r=>{
+    lines.push(`"${seller.name}","${m.label}","${r.name}",${r.price},${r.qty},${r.revenue}`);
+  });
+
+  // 空行
+  lines.push('');
+
+  // 合計・繰越・最終
+  lines.push(`"${seller.name}","${m.label}","当月売上合計",,${tQty},${tRev}`);
+  lines.push(`"${seller.name}","${m.label}","手数料(20%)",,,-${comm}`);
+  lines.push(`"${seller.name}","${m.label}","当月支払対象額",,,${payout}`);
+
+  carryovers.forEach(c=>{
+    lines.push(`"${seller.name}","${c.label}","繰越（未払い）",,,${c.payout}`);
+  });
+
+  if (carryovers.length) {
+    lines.push(`"${seller.name}","","繰越合計支払対象額",,,${carryPayout}`);
+  }
+
+  lines.push(`"${seller.name}","","振込手数料",,,-${tfee}`);
+  lines.push(`"${seller.name}","","最終振込金額",,,${final}`);
+
+  const csv=lines.join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`${m.label}_精算_${seller.name}.csv`;
+  a.click();
+  toast(`${seller.name} のCSVをダウンロードしました ✓`);
+}
+
+
 function dlXLSX(monthId, sellerId) {
   const d=buildSettlementData(monthId, sellerId); if (!d) return;
   const {m, seller, rows, tRev, tQty, comm, payout, tfee, final, carryovers, carryTotal, carryPayout}=d;
