@@ -952,21 +952,24 @@ function dlMonthlyCSV() {
     const d = buildSettlementData(mid, s.id);
     if (!d) return;
     const {rows, tRev, payout, carryovers, carryTotal, final} = d;
-    if (tRev === 0 && carryovers.length === 0) return; // 売上も繰越もない人はスキップ
+    if (tRev === 0 && carryovers.length === 0) return;
 
-    // 明細行
-    rows.filter(r=>r.qty>0).forEach(r => {
-      lines.push(`"${s.name}","${r.name}",${r.price},${r.qty},${r.revenue},,`);
+    // 明細行（名前は最初の1行だけ）
+    const soldRows = rows.filter(r=>r.qty>0);
+    soldRows.forEach((r, i) => {
+      const name = i===0 ? `"${s.name}"` : '';
+      lines.push(`${name},"${r.name}",${r.price},${r.qty},${r.revenue},,`);
     });
     // 合計行
-    lines.push(`"${s.name}","当月合計",,${rows.reduce((s,r)=>s+r.qty,0)},${tRev},${payout},`);
+    const firstBlank = soldRows.length > 0 ? '' : `"${s.name}"`;
+    lines.push(`,"当月合計",,${rows.reduce((s,r)=>s+r.qty,0)},${tRev},${payout},`);
     // 繰越行
     carryovers.forEach(c => {
-      lines.push(`"${s.name}","繰越（${c.label}）",,,,，${c.payout}`);
+      lines.push(`,"繰越（${c.label}）",,,,,${c.payout}`);
     });
     // 最終
     if (carryovers.length) {
-      lines.push(`"${s.name}","最終振込金額",,,,,${final}`);
+      lines.push(`,"最終振込金額",,,,,${final}`);
     }
     // 空行（区切り）
     lines.push(',,,,,,');
