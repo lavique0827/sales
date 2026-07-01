@@ -235,6 +235,7 @@ tfoot td.num { text-align: right; }
           <select id="filter-vendor" onchange="renderDetailTable()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none"></select>
           <input type="text" id="filter-q" oninput="renderDetailTable()" placeholder="🔍 商品名検索..." style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;min-width:160px">
           <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ CSV出力</button>
+          <button class="btn btn-sm" style="background:var(--deep-rose);color:white" onclick="openAddRowForm()">＋ 手動追加</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -253,6 +254,34 @@ tfoot td.num { text-align: right; }
           <tbody id="detail-tbody"></tbody>
           <tfoot id="detail-tfoot"></tfoot>
         </table>
+      </div>
+      <!-- 手動追加フォーム -->
+      <div id="add-row-form" style="display:none;margin-top:14px;background:#fff8f5;border:1px solid var(--rose);border-radius:10px;padding:16px 18px">
+        <div style="font-size:13px;font-weight:600;color:var(--deep);margin-bottom:12px">＋ 行を手動追加</div>
+        <div class="form-row" style="margin-bottom:10px">
+          <div class="form-group">
+            <label>販売者</label>
+            <select id="add-seller" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none">
+              <option value="">— 選択 —</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:2">
+            <label>商品名</label>
+            <input id="add-name" placeholder="例：Mon Bébé シリーズ - Chéri＆Nature 2枚セット" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;width:100%">
+          </div>
+          <div class="form-group">
+            <label>単価（円）</label>
+            <input id="add-price" type="number" placeholder="2750" min="0" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;width:100%">
+          </div>
+          <div class="form-group">
+            <label>販売数</label>
+            <input id="add-qty" type="number" placeholder="1" min="1" value="1" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;width:100%">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="saveAddRow()">追加する</button>
+          <button class="btn btn-secondary btn-sm" onclick="closeAddRowForm()">キャンセル</button>
+        </div>
       </div>
     </div>
   </div>
@@ -785,8 +814,69 @@ function saveDetailRow(i) {
   showDetail(S.curMonthId);
   toast('データを更新しました ✓');
 }
+function openAddRowForm() {
+  if (!S.curMonthId) { toast('月を選択してください','err'); return; }
+  // 販売者ドロップダウンを更新
+  const sel = document.getElementById('add-seller');
+  sel.innerHTML = '<option value="">— 選択 —</option>' +
+    S.sellers.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  // 商品名・価格フィールドをリセット
+  document.getElementById('add-name').value = '';
+  document.getElementById('add-price').value = '';
+  document.getElementById('add-qty').value = '1';
+  const form = document.getElementById('add-row-form');
+  form.style.display = 'block';
+  form.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function closeAddRowForm() {
+  document.getElementById('add-row-form').style.display = 'none';
+}
+
+// 販売者選択時に商品名を補完・単価を自動入力（init後に呼ぶ）
+function initAddRowListeners() {
+  document.getElementById('add-seller').addEventListener('change', function() {
+    const sid = this.value;
+    const seller = S.sellers.find(s=>s.id===sid);
+    if (seller && seller.products && seller.products.length) {
+      let dl = document.getElementById('add-name-list');
+      if (!dl) { dl = document.createElement('datalist'); dl.id='add-name-list'; document.body.appendChild(dl); }
+      dl.innerHTML = seller.products.map(p=>`<option value="${p.name}">`).join('');
+      document.getElementById('add-name').setAttribute('list','add-name-list');
+    }
+  });
+  document.getElementById('add-name').addEventListener('change', function() {
+    const sid = document.getElementById('add-seller').value;
+    const seller = S.sellers.find(s=>s.id===sid);
+    if (!seller) return;
+    const prod = (seller.products||[]).find(p=>p.name===this.value);
+    if (prod) document.getElementById('add-price').value = prod.price;
+  });
+}
+
+function saveAddRow() {
+  const m = S.records.find(r=>r.id===S.curMonthId); if (!m) return;
+  const sellerId = document.getElementById('add-seller').value;
+  const name = document.getElementById('add-name').value.trim();
+  const price = parseInt(document.getElementById('add-price').value)||0;
+  const qty = parseInt(document.getElementById('add-qty').value)||1;
+
+  if (!sellerId) { toast('販売者を選択してください','err'); return; }
+  if (!name) { toast('商品名を入力してください','err'); return; }
+  if (price <= 0) { toast('単価を入力してください','err'); return; }
+
+  const seller = S.sellers.find(s=>s.id===sellerId);
+  m.rows.push({
+    sellerId, vendor: seller?seller.name:'',
+    name, price, qty, match:'full'
+  });
+  persist();
+  closeAddRowForm();
+  showDetail(S.curMonthId);
+  toast(`「${name}」を追加しました ✓`);
+}
+
 function exportCSV() {
-  if (!S.curMonthId) return;
   const m=S.records.find(r=>r.id===S.curMonthId);
   // 画面に表示中の行をそのまま使う（フィルター・ソート・販売者名反映済み）
   const rows=S._detailRows||[];
@@ -1436,6 +1526,7 @@ dz.addEventListener('drop',e=>{
 // ===== Init =====
 hydrate();
 renderSellersList();
+initAddRowListeners();
 </script>
 </body>
 </html>
