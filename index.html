@@ -170,7 +170,7 @@ tfoot td.num { text-align: right; }
     <div class="card-title">➕ 販売者を登録</div>
     <div class="form-row">
       <div class="form-group"><label>販売者名</label><input id="s-name" placeholder="例：河崎友美"></div>
-      <div class="form-group"><label>ShopifyベンダーID（任意・補助照合用）</label><input id="s-vendor" placeholder="例：papillon room"></div>
+      <div class="form-group"><label>ShopifyベンダーID（カンマ区切りで複数可）</label><input id="s-vendor" placeholder="例：後藤あい, Lavique（ラヴィーク）, papillon room"></div>
       <div class="form-group"><label>メールアドレス</label><input id="s-email" type="email" placeholder="example@email.com"></div>
       <div class="form-group"><label>電話番号</label><input id="s-phone" placeholder="090-0000-0000"></div>
     </div>
@@ -318,7 +318,7 @@ tfoot td.num { text-align: right; }
     <div class="modal-body">
       <div class="form-row">
         <div class="form-group"><label>販売者名</label><input id="e-name" placeholder="例：河崎友美"></div>
-        <div class="form-group"><label>ShopifyベンダーID（Vendor列）</label><input id="e-vendor" placeholder="例：papillon room"></div>
+        <div class="form-group"><label>ShopifyベンダーID（カンマ区切りで複数可）</label><input id="e-vendor" placeholder="例：後藤あい, Lavique（ラヴィーク）, papillon room"></div>
         <div class="form-group"><label>メールアドレス</label><input id="e-email" type="email"></div>
         <div class="form-group"><label>電話番号</label><input id="e-phone"></div>
       </div>
@@ -589,10 +589,15 @@ function parseCSV(text, filename) {
       if (p) { matchedSeller=s; matchedProduct=p; break; }
     }
     // ② 商品名で見つからなければVendor名で販売者を探す
-    if (!matchedSeller) matchedSeller=S.sellers.find(s=>s.vendor===r.vendor);
+    // Vendor名はカンマ区切りで複数登録可能（例：「後藤あい, Lavique（ラヴィーク）, papillon room」）
+    if (!matchedSeller) {
+      matchedSeller=S.sellers.find(s=>{
+        const vendors=(s.vendor||'').split(',').map(v=>v.trim()).filter(Boolean);
+        return vendors.includes(r.vendor);
+      });
+    }
 
     const match=matchedSeller&&matchedProduct?'full':matchedSeller?'seller':'none';
-    // 照合できた販売者のVendor名で上書き（CSV側のvendorを正として使いつつ、販売者名表示に使う）
     const displayVendor=matchedSeller?matchedSeller.vendor:r.vendor;
     return {...r, vendor:displayVendor, price:matchedProduct?matchedProduct.price:r.price, match, sellerId:matchedSeller?.id||null};
   });
@@ -636,8 +641,8 @@ function saveRecord() {
   S.pendingImport=null;
   persist();
   document.getElementById('import-result').style.display='none';
-  toast(`${rec.label} を保存しました ✓`);
-  switchTab('sales');
+  renderMonthGrid();
+  toast(`${rec.label} を保存しました ✓ → 月次集計タブで確認できます`);
 }
 
 // ===== Monthly =====
@@ -899,18 +904,43 @@ function saveAddRow() {
 }
 
 function exportCSV() {
-  const m=S.records.find(r=>r.id===S.curMonthId);
-  // 画面に表示中の行をそのまま使う（フィルター・ソート・販売者名反映済み）
-  const rows=S._detailRows||[];
-  const mLabel=s=>s==='full'?'完全一致':s==='seller'?'販売者のみ':'未照合';
-  const sellerLabel=r=>{
-    if (r.sellerId){ const s=S.sellers.find(x=>x.id===r.sellerId); return s?s.name:r.vendor; }
-    return r.vendor||'';
-  };
-  const body=rows.map(r=>`"${sellerLabel(r)}","${r.name}","${mLabel(r.match)}",${r.qty},${r.price},${r.revenue},${r.commission},${r.payout}`).join('\n');
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob(['\uFEFF販売者,商品名,照合,販売数,単価,売上合計,手数料,支払い金額\n'+body],{type:'text/csv;charset=utf-8'}));
-  a.download=m.label+'_売上集計.csv'; a.click(); toast('CSVをダウンロードしました ✓');
+  const mid = S.curMonthId; if (!mid) return;
+  const m = S.records.find(r=>r.id===mid); if (!m) return;
+
+  const lines = ['\uFEFF名前,商品名,単価,個数,小計,合計（支払額）,繰越金'];
+
+  S.sellers.forEach(s => {
+    const d = buildSettlementData(mid, s.id);
+    if (!d) return;
+    const {rows, tRev, payout, carryovers, final} = d;
+    if (tRev === 0 && carryovers.length === 0) return;
+
+    const soldRows = rows.filter(r=>r.qty>0);
+    let nameUsed = false;
+
+    soldRows.forEach(r => {
+      const name = !nameUsed ? `"${s.name}"` : '';
+      nameUsed = true;
+      lines.push(`${name},"${r.name}",${r.price},${r.qty},${r.revenue},,`);
+    });
+
+    const firstCol = !nameUsed ? `"${s.name}"` : '';
+    lines.push(`${firstCol},"当月合計",,${soldRows.reduce((s,r)=>s+r.qty,0)},${tRev},${payout},`);
+
+    carryovers.forEach(c => {
+      lines.push(`,"繰越（${c.label}）",,,,,${c.payout}`);
+    });
+    if (carryovers.length) {
+      lines.push(`,"最終振込金額",,,,,${final}`);
+    }
+    lines.push(',,,,,,');
+  });
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'}));
+  a.download = `EC月次売上_-_${m.label}.csv`;
+  a.click();
+  toast('CSVをダウンロードしました ✓');
 }
 
 // ===== Payment Status =====
