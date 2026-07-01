@@ -644,12 +644,34 @@ function saveRecord() {
 function agg(rows) {
   const map={};
   rows.forEach(r=>{
-    // sellerIdがあればそれを優先キーに使う
     const k=(r.sellerId||r.vendor)+'|||'+r.name;
     if (!map[k]) map[k]={vendor:r.vendor, sellerId:r.sellerId||null, name:r.name, price:r.price, qty:0, match:r.match||'none'};
     map[k].qty+=r.qty;
   });
-  return Object.values(map).map(r=>{
+
+  // 同じ商品名でsellerId有り・無しが混在している場合を統合
+  // （バックアップ復元後の旧データ＋新データの二重計上を防ぐ）
+  const byName={};
+  Object.values(map).forEach(r=>{
+    const n=r.name;
+    if (!byName[n]) {
+      byName[n]={...r};
+    } else {
+      // sellerIdがある方を優先して統合、ない場合は加算しない（別販売者の同名商品は存在しない前提）
+      if (r.sellerId && !byName[n].sellerId) {
+        // sellerId付きの行に統合（旧データのqtyは捨てる）
+        byName[n]={...r};
+      } else if (!r.sellerId && byName[n].sellerId) {
+        // sellerId側が既にある場合は旧データを無視
+        // (何もしない)
+      } else {
+        // 両方sellerId付き（異なる販売者）→通常はありえないが加算
+        byName[n].qty+=r.qty;
+      }
+    }
+  });
+
+  return Object.values(byName).map(r=>{
     const rev=r.qty*r.price, comm=Math.round(rev*0.2);
     return {...r, revenue:rev, commission:comm, payout:rev-comm};
   });
