@@ -255,6 +255,15 @@ tfoot td.num { text-align: right; }
           <tfoot id="detail-tfoot"></tfoot>
         </table>
       </div>
+      <!-- まとめて保存バー -->
+      <div id="batch-save-bar" style="display:none;position:sticky;bottom:16px;background:var(--deep);color:white;border-radius:12px;padding:12px 20px;margin-top:14px;align-items:center;justify-content:space-between;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,0.2);z-index:10">
+        <span id="batch-save-count" style="font-size:13px;font-weight:600"></span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="S._editingRows.clear();renderDetailTable();updateBatchSaveBar()">すべてキャンセル</button>
+          <button class="btn btn-sm" style="background:var(--accent);color:white;font-weight:700;padding:8px 20px" onclick="commitAllEdits()">💾 まとめて保存</button>
+        </div>
+      </div>
+
       <!-- 手動追加フォーム -->
       <div id="add-row-form" style="display:none;margin-top:14px;background:#fff8f5;border:1px solid var(--rose);border-radius:10px;padding:16px 18px">
         <div style="font-size:13px;font-weight:600;color:var(--deep);margin-bottom:12px">＋ 行を手動追加</div>
@@ -344,7 +353,7 @@ tfoot td.num { text-align: right; }
 
 <script>
 // ===== State =====
-const S = { sellers:[], records:[], payments:{}, vendorMap:{}, curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false, pendingImport:null };
+const S = { sellers:[], records:[], payments:{}, vendorMap:{}, curMonthId:null, curProdSeller:null, sortKey:'revenue', sortAsc:false, pendingImport:null, _detailRows:[], _editingRows:new Set() };
 // payments 構造: { "monthId_sellerId": true } → 支払い済みフラグ
 // vendorMap 構造: { "Lavique（ラヴィーク）": "sellerId" } → Vendor→販売者マッピング
 
@@ -781,6 +790,9 @@ function delMonth(id) {
 }
 function showDetail(id) {
   const m=S.records.find(r=>r.id===id); if (!m) return;
+  S.curMonthId=id;
+  S._editingRows.clear();
+  updateBatchSaveBar();
   document.getElementById('month-detail').style.display='block';
   document.getElementById('detail-label').textContent=m.label+' 月次集計';
 
@@ -868,48 +880,76 @@ function editDetailRow(i) {
   const rawRows=m.rows.filter(x=>(x.sellerId||x.vendor)===sellerPart && x.name===r.name);
   const totalQty=rawRows.reduce((s,x)=>s+x.qty,0);
   const row=document.getElementById('drow-'+i); if (!row) return;
+  S._editingRows.add(i);
   // 販売者ドロップダウン
   const sellerOptions=S.sellers.map(s=>
     `<option value="${s.id}" ${s.id===r.sellerId?'selected':''}>${s.name}</option>`
   ).join('');
   row.innerHTML=`
-    <td colspan="9">
-      <div class="p-edit-row" style="flex-wrap:wrap;gap:10px;padding:12px 14px">
+    <td colspan="9" style="background:#fff8f5;border-left:3px solid var(--rose)">
+      <div class="p-edit-row" style="flex-wrap:wrap;gap:10px;padding:12px 14px;align-items:center">
         <span style="font-size:12px;font-weight:600;color:var(--deep);min-width:180px">${r.name}</span>
         <label style="font-size:11px;color:var(--muted)">販売者</label>
-        <select id="dedit-seller" style="padding:5px 8px;border:1px solid var(--rose);border-radius:6px;font-size:12px;font-family:'Noto Sans JP',sans-serif">
+        <select id="dedit-seller-${i}" style="padding:5px 8px;border:1px solid var(--rose);border-radius:6px;font-size:12px;font-family:'Noto Sans JP',sans-serif">
           <option value="">— 未割当 —</option>
           ${sellerOptions}
         </select>
         <label style="font-size:11px;color:var(--muted)">販売数</label>
-        <input id="dedit-qty" type="number" value="${totalQty}" style="width:70px">
+        <input id="dedit-qty-${i}" type="number" value="${totalQty}" style="width:70px">
         <label style="font-size:11px;color:var(--muted)">単価</label>
-        <input id="dedit-price" type="number" value="${r.price}" style="width:90px">
-        <button class="btn btn-primary btn-sm" onclick="saveDetailRow(${i})">保存</button>
-        <button class="btn btn-secondary btn-sm" onclick="renderDetailTable()">キャンセル</button>
+        <input id="dedit-price-${i}" type="number" value="${r.price}" style="width:90px">
+        <button class="btn btn-secondary btn-sm" onclick="cancelRowEdit(${i})">✕ キャンセル</button>
       </div>
     </td>`;
+  updateBatchSaveBar();
 }
 
-function saveDetailRow(i) {
+function cancelRowEdit(i) {
+  S._editingRows.delete(i);
+  renderDetailTable();
+  updateBatchSaveBar();
+}
+
+function updateBatchSaveBar() {
+  const bar = document.getElementById('batch-save-bar');
+  if (!bar) return;
+  const n = S._editingRows.size;
+  if (n > 0) {
+    bar.style.display = 'flex';
+    document.getElementById('batch-save-count').textContent = `${n}件編集中`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function commitAllEdits() {
   const m=S.records.find(r=>r.id===S.curMonthId); if (!m) return;
-  const r=S._detailRows[i]; if (!r) return;
-  const sellerPart=r.sellerId||r.vendor;
-  const newQty=parseInt(document.getElementById('dedit-qty').value)||0;
-  const newPrice=parseInt(document.getElementById('dedit-price').value)||0;
-  const newSellerId=document.getElementById('dedit-seller').value||null;
-  const newSeller=newSellerId?S.sellers.find(s=>s.id===newSellerId):null;
-  // 元データを削除して1行に統合
-  m.rows=m.rows.filter(x=>!((x.sellerId||x.vendor)===sellerPart && x.name===r.name));
-  m.rows.push({
-    sellerId: newSellerId||null,
-    vendor: newSeller?newSeller.name:(r.vendor||''),
-    name: r.name, price: newPrice, qty: newQty, match:'full'
+  let saved=0;
+  S._editingRows.forEach(i=>{
+    const r=S._detailRows[i]; if (!r) return;
+    const sellerPart=r.sellerId||r.vendor;
+    const newQty=parseInt(document.getElementById(`dedit-qty-${i}`)?.value)||0;
+    const newPrice=parseInt(document.getElementById(`dedit-price-${i}`)?.value)||0;
+    const newSellerId=document.getElementById(`dedit-seller-${i}`)?.value||null;
+    const newSeller=newSellerId?S.sellers.find(s=>s.id===newSellerId):null;
+    m.rows=m.rows.filter(x=>!((x.sellerId||x.vendor)===sellerPart && x.name===r.name));
+    m.rows.push({
+      sellerId: newSellerId||null,
+      vendor: newSeller?newSeller.name:(r.vendor||''),
+      name: r.name, price: newPrice, qty: newQty, match:'full'
+    });
+    saved++;
   });
+  S._editingRows.clear();
   persist();
   showDetail(S.curMonthId);
-  toast('データを更新しました ✓');
+  updateBatchSaveBar();
+  toast(`${saved}件のデータを保存しました ✓`);
 }
+
+// 旧saveDetailRow（互換性のため残す）
+function saveDetailRow(i) { commitAllEdits(); }
+
 function openAddRowForm() {
   if (!S.curMonthId) { toast('月を選択してください','err'); return; }
   // 販売者ドロップダウンを更新
